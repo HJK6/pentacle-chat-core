@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "fixtures": {
+    "tests/agentQuestionChatRender.test.ts": "Synthetic identities in routing, rendering, protocol or isolation test fixtures.",
+    "tests/chatListSelector.test.ts": "Synthetic identities in routing, rendering, protocol or isolation test fixtures.",
+    "tests/questionAnswerFormat.test.ts": "Synthetic identities in routing, rendering, protocol or isolation test fixtures.",
+    "tests/unifiedFeed.test.ts": "Synthetic identities in routing, rendering, protocol or isolation test fixtures."
+  }
+}
