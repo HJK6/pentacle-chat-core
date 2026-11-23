@@ -118,6 +118,8 @@ export interface PentacleEvent {
   action_committed?: boolean | null;
   provider_queued?: boolean;
   correlatedDaemonSeq?: number | null;
+  /** Client projection of an already reconciled multi-input FIFO echo. */
+  compositeEcho?: Readonly<{ text: string; index: number }>;
   pending?: boolean;
   created_at?: number;
   queued_at?: number;

@@ -425,6 +425,7 @@ type TranscriptEventSortKey = {
   time: number;
   hasTime: boolean;
   deterministicTie: string;
+  compositeIndex: number;
 };
 
 function transcriptEventDeterministicTie(event: PentacleEvent): string {
@@ -435,7 +436,7 @@ function transcriptEventDeterministicTie(event: PentacleEvent): string {
     String(event.raw?.uuid || event.jsonl_record_uuid || ''),
     String(event.daemon_seq),
     String(event.timestamp || ''),
-    String(event.text || ''),
+    String(event.compositeEcho?.text ?? event.text ?? ''),
   ].join('\u0000');
 }
 
@@ -449,6 +450,7 @@ function buildTranscriptEventSortKeys(events: readonly PentacleEvent[]): Map<Pen
       time,
       hasTime: Number.isFinite(time),
       deterministicTie: transcriptEventDeterministicTie(event),
+      compositeIndex: event.compositeEcho?.index ?? 0,
     }];
   }));
 }
@@ -458,7 +460,7 @@ function compareTranscriptEventSortKeys(left: TranscriptEventSortKey, right: Tra
   if (left.hasTime !== right.hasTime) return left.hasTime ? -1 : 1;
   if (left.hasSeq && right.hasSeq && left.seq !== right.seq) return left.seq - right.seq;
   if (left.hasSeq !== right.hasSeq) return left.hasSeq ? -1 : 1;
-  return left.deterministicTie.localeCompare(right.deterministicTie);
+  return left.deterministicTie.localeCompare(right.deterministicTie) || left.compositeIndex - right.compositeIndex;
 }
 
 function sortTranscriptEventsForDisplay(events: PentacleEvent[]): PentacleEvent[] {
@@ -1736,11 +1738,22 @@ function buildSessionTranscriptRows(
     return true;
   });
   let trailingBlankDroppedCount = 0;
+  const seenLaneUpdateKeys = new Set<string>();
+  const laneUpdates = new Map<PentacleEvent, WorkLaneUpdate>();
   const dedupedEvents = suppressToolRowsCoveredByBatch(coalesceInterpretedEvents(filteredEvents)).filter((item) => {
     if (isReturnedToPromptUserEvent(item.event)) return false;
     if (shouldDropEmptyTranscriptRow(item)) {
       trailingBlankDroppedCount += 1;
       return false;
+    }
+    const laneUpdate = parseLaneUpdateEvent(item.event);
+    if (laneUpdate) {
+      // Keep the first logical publication in transcript order, before a
+      // republication can consume a visible slot or inflate hidden history.
+      const key = item.event.message_id || laneUpdate.update_id;
+      if (seenLaneUpdateKeys.has(key)) return false;
+      seenLaneUpdateKeys.add(key);
+      laneUpdates.set(item.event, laneUpdate);
     }
     return true;
   });
@@ -1773,7 +1786,6 @@ function buildSessionTranscriptRows(
   ));
   const transcriptItems: PentacleTranscriptItem[] = [];
   let lastTimestampMinute = '';
-  const seenLaneUpdateKeys = new Set<string>();
 
   for (const item of visibleEvents) {
     const event = item.event;
@@ -1811,15 +1823,8 @@ function buildSessionTranscriptRows(
     }
 
     const authoritativeSeq = authoritativeEventSeq(event);
-    const laneUpdate = parseLaneUpdateEvent(event);
+    const laneUpdate = laneUpdates.get(event);
     const dashboardLink = item.displayRule === 'bubble:assistant' ? assistantDashboardLink(event) : null;
-    if (laneUpdate) {
-      // A re-published update keeps its message id across daemon sequences; the
-      // timeline shows each typed update once.
-      const laneUpdateKey = event.message_id || laneUpdate.update_id;
-      if (seenLaneUpdateKeys.has(laneUpdateKey)) continue;
-      seenLaneUpdateKeys.add(laneUpdateKey);
-    }
     const nextItem: PentacleTranscriptItem = {
       id: event.optimistic_id || (Number.isFinite(authoritativeSeq) ? String(authoritativeSeq) : String(event.daemon_seq)),
       timestampLabel,
@@ -1970,7 +1975,10 @@ function buildSessionTranscriptRows(
     if (event.stream_id !== streamId) return false;
     if (isReturnedToPromptUserEvent(event)) return false;
     if (event.kind !== fallbackKind) return false;
-    if (normalizedEventText(event.text) !== fallbackCompareText) return false;
+    if (normalizedEventText(event.text) !== fallbackCompareText &&
+      // A reconciled FIFO echo is represented by its constituent client rows.
+      !(event.client_origin && event.compositeEcho &&
+        normalizedEventText(event.compositeEcho.text) === fallbackCompareText)) return false;
     if (!includeTools) {
       const eventInterpretation = interpretPentacleEvent(event, resolveHostTitle(session.host));
       if (isToolActionRow(eventInterpretation) && !isToolActionRow(fallbackInterpretation)) {

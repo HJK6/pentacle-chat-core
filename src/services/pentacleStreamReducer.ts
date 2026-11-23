@@ -1254,6 +1254,9 @@ function findUnambiguousOptimisticEchoMatch(
       send.turn_queued !== true &&
       canUseTextFallbackStatus(send.status) &&
       send.stream_id === event.stream_id &&
+      // Explicitly different message identities rule out every text fallback,
+      // including delayed echoes outside the normal matching window.
+      (!send.message_id || !event.message_id || send.message_id === event.message_id) &&
       // An attachment send's echo is the daemon wrapper, not the caption; match
       // it by its embedded attachment keys so it reconciles like a plain echo.
       (send.text === event.text ||
@@ -1297,32 +1300,32 @@ function reconcileCompositeOptimisticEcho(
   optimisticIds: string[],
 ): PentacleStreamState {
   let next = state;
-  for (const optimisticId of optimisticIds) {
+  for (const [index, optimisticId] of optimisticIds.entries()) {
     const send = next.optimisticSends?.[optimisticId];
     if (!send) continue;
     emitOptimisticOrphanResolvedIfNeeded(next, optimisticId, event, 'live');
-    next = reconcileOptimisticSendWithServerEvent(next, optimisticId, {
-      ...event,
-      // A composite daemon echo acknowledges every queued row, but each
-      // client row must retain its own paragraph text.
-      text: send.text,
-    });
+    next = reconcileOptimisticSendWithServerEvent(next, optimisticId, compositeEchoPart(event, send, index));
   }
   return next;
 }
 
+function compositeEchoPart(event: PentacleEvent, send: OptimisticSendState, index: number): PentacleEvent {
+  return { ...event, text: send.text, compositeEcho: { text: event.text, index } };
+}
+
 function snapshotEventMatchesPriorCorrelatedOptimistic(prior: PentacleEvent, event: PentacleEvent) {
-  const priorDaemonSeq = Number(prior.correlatedDaemonSeq);
-  if (!prior.optimistic_id || !Number.isFinite(priorDaemonSeq)) return false;
   return (
+    isServerUserEcho(event) &&
     event.stream_id === prior.stream_id &&
     event.kind === prior.kind &&
-    // A reconciled attachment row carries the caption as its text while the raw
-    // snapshot echo still carries the daemon wrapper, so match those by the
-    // wrapper's embedded keys; daemon_seq equality below keeps it unambiguous.
-    (event.text === prior.text ||
-      serverUserEchoMatchesAttachmentWrapper(prior.attachments, prior.text, event.text)) &&
-    Number(event.daemon_seq) === priorDaemonSeq
+    (!event.optimistic_id || event.optimistic_id === prior.optimistic_id) &&
+    (!event.message_id || !prior.message_id || event.message_id === prior.message_id) &&
+    Number(event.daemon_seq) === prior.correlatedDaemonSeq &&
+    (prior.compositeEcho
+      ? event.text === prior.compositeEcho.text
+      // Attachment rows carry the caption; the snapshot carries the wrapper.
+      : event.text === prior.text ||
+        serverUserEchoMatchesAttachmentWrapper(prior.attachments, prior.text, event.text))
   );
 }
 
@@ -1330,32 +1333,41 @@ function carryPriorCorrelatedOptimisticEvents(
   previousState: PentacleStreamState,
   snapshotEvents: PentacleEvent[],
 ): PentacleEvent[] {
-  let nextEvents = snapshotEvents;
-  const touchedStreamIds = new Set(snapshotEvents.map((event) => String(event.stream_id || '')).filter(Boolean));
   const priorEventsByStream = selectPentacleDerivedEventIndex(previousState).byStream;
-  for (const streamId of touchedStreamIds) {
+  const priorByEcho = new Map<string, PentacleEvent[]>();
+  const echoKey = (streamId: string, seq: number) => JSON.stringify([streamId, seq]);
+  for (const streamId of new Set(snapshotEvents.filter(isServerUserEcho).map(event => event.stream_id))) {
     for (const prior of priorEventsByStream.get(streamId) ?? []) {
-      if (!prior.optimistic_id || !Number.isFinite(Number(prior.correlatedDaemonSeq))) continue;
-      const echoIndex = nextEvents.findIndex((event) => snapshotEventMatchesPriorCorrelatedOptimistic(prior, event));
-      if (echoIndex === -1) continue;
-      const echo = nextEvents[echoIndex];
-      if (echo.optimistic_id === prior.optimistic_id && echo.correlatedDaemonSeq === prior.correlatedDaemonSeq) {
-        continue;
-      }
-      if (nextEvents === snapshotEvents) {
-        nextEvents = snapshotEvents.slice();
-      }
-      nextEvents[echoIndex] = reconciledOptimisticEvent(
-        prior.optimistic_id,
-        echo,
-        previousState.optimisticSends?.[prior.optimistic_id]?.attachments ?? prior.attachments,
-        previousState.optimisticSends?.[prior.optimistic_id]?.queued_at ?? prior.queued_at,
-        prior,
-        previousState.optimisticSends?.[prior.optimistic_id]?.text ?? prior.text,
-      );
+      const seq = prior.correlatedDaemonSeq;
+      if (!prior.client_origin || !prior.optimistic_id || seq == null || !Number.isFinite(seq)) continue;
+      const key = echoKey(streamId, seq);
+      const group = priorByEcho.get(key) ?? [];
+      group.push(prior);
+      priorByEcho.set(key, group);
     }
   }
-  return nextEvents;
+  if (priorByEcho.size === 0) return snapshotEvents;
+  return snapshotEvents.flatMap(echo => {
+    if (!isServerUserEcho(echo)) return [echo];
+    const priors = priorByEcho.get(echoKey(echo.stream_id, Number(echo.daemon_seq)))
+      ?.filter(prior => snapshotEventMatchesPriorCorrelatedOptimistic(prior, echo));
+    if (!priors?.length) return [echo];
+    // Expand one durable echo at its original position, maintaining its FIFO
+    // client row identities without reopening any retired optimistic sends.
+    return priors.sort((left, right) => (left.compositeEcho?.index ?? 0) - (right.compositeEcho?.index ?? 0))
+      .map(prior => {
+        const optimisticId = prior.optimistic_id!;
+        const send = previousState.optimisticSends?.[optimisticId];
+        return reconciledOptimisticEvent(
+          optimisticId,
+          prior.compositeEcho ? { ...echo, text: prior.text, compositeEcho: prior.compositeEcho } : echo,
+          send?.attachments ?? prior.attachments,
+          send?.queued_at ?? prior.queued_at,
+          prior,
+          send?.text ?? prior.text,
+        );
+      });
+  });
 }
 
 function retractReturnedToPromptSnapshotRows(
@@ -1463,6 +1475,11 @@ function reconciledOptimisticEvent(
   priorEvent?: PentacleEvent,
   optimisticText?: string,
 ): PentacleEvent {
+  // A live replacement of the same durable FIFO echo is still one
+  // constituent row, not a new combined message.
+  if (priorEvent?.compositeEcho && snapshotEventMatchesPriorCorrelatedOptimistic(priorEvent, serverEvent)) {
+    serverEvent = { ...serverEvent, text: priorEvent.text, compositeEcho: priorEvent.compositeEcho };
+  }
   const daemonSeq = Number(serverEvent.daemon_seq);
   const directMatch = serverEvent.optimistic_id === optimisticId;
   if (!directMatch && Number.isFinite(daemonSeq) &&
@@ -1588,24 +1605,20 @@ export function applySnapshotWithOptimisticReconciliation(
   snapshotEvents = snapshotEvents.slice();
   for (let eventIndex = 0; eventIndex < snapshotEvents.length; eventIndex += 1) {
     const echo = snapshotEvents[eventIndex];
+    if (!isServerUserEcho(echo)) continue;
     const compositeOptimisticIds = findMatchingCompositeQueuedOptimisticIds(
       echo,
       Object.values(snapshotState.optimisticSends ?? {}),
     );
     if (compositeOptimisticIds.length === 0) continue;
     const reconciledEvents: PentacleEvent[] = [];
-    for (const optimisticId of compositeOptimisticIds) {
+    for (const [index, optimisticId] of compositeOptimisticIds.entries()) {
       const send = snapshotState.optimisticSends?.[optimisticId];
       if (!send || matchedOptimisticIds.has(optimisticId)) continue;
       emitOptimisticOrphanResolvedIfNeeded(snapshotState, optimisticId, echo, 'snapshot', now);
       reconciledEvents.push(reconciledOptimisticEvent(
         optimisticId,
-        {
-          ...echo,
-          // One composite server row acknowledges several sends; preserve
-          // each queued paragraph in the corresponding client row.
-          text: send.text,
-        },
+        compositeEchoPart(echo, send, index),
         send.attachments,
         send.queued_at,
         undefined,

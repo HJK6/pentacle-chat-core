@@ -11,6 +11,7 @@ import {
   interpretPentacleEvent,
   PENTACLE_MESSAGE_ENVELOPE_RENDER_POLICIES,
   sendOptimisticMessage,
+  selectSessionDetail,
   type PentacleEvent,
 } from '../src/index.ts';
 import { normalizeProviderUserText } from '../src/services/providerWrapper.ts';
@@ -320,6 +321,55 @@ test('fresh snapshot reconciles a one-LF FIFO batch without mutating frozen even
     ids.map((id, index) => ({ id, text: texts[index], pending: false })),
   );
 });
+
+for (const firstEcho of ['snapshot', 'live'] as const) {
+  test(`two full snapshots preserve individual FIFO rows after ${firstEcho} reconciliation`, () => {
+    const streamId = 'host:child';
+    const texts = ['zeta first', 'alpha second'];
+    const ids = ['fifo-first', 'fifo-second'];
+    const now = Date.parse('2026-09-20T00:00:00Z');
+    const echo = event({
+      daemon_seq: 9, message_id: 'fifo-echo',
+      text: texts.join('\n'), timestamp: new Date(now + 3000).toISOString(),
+    });
+    const sessions = [{
+      stream_id: streamId, host: 'host', provider: 'codex', session_name: 'child',
+      last_event_at: echo.timestamp, last_text: echo.text, last_kind: 'USER',
+      draft: '', pending: false, working: false, online: true,
+    }];
+    let state = { ...initialPentacleStreamState, connected: true, sessions };
+    for (const [index, text] of texts.entries()) {
+      state = sendOptimisticMessage(state, {
+        streamId, text, optimisticId: ids[index], requestId: `request-${ids[index]}`,
+        createdAt: now + index, queuedAt: now + index, beginTurn: false,
+      });
+    }
+    if (firstEcho === 'live') state = applyPentacleEvent(state, echo);
+    const expected = ids.map((id, index) => [id, texts[index]]);
+    const rendered: Array<Array<[string, string]>> = [];
+    for (const cycle of [1, 2]) {
+      state = applySnapshotWithOptimisticReconciliation(state, { sessions, events: [echo] }, now + 4000 + cycle);
+      assert.deepEqual(Object.keys(state.optimisticSends ?? {}), []);
+      assert.deepEqual(
+        state.events.filter(item => item.client_origin && item.optimistic_id).map(item => [item.optimistic_id, item.text]),
+        expected,
+        `snapshot ${cycle} projection`,
+      );
+      const rows = selectSessionDetail(state, streamId, { visibleCount: 'all' })!.transcriptItems;
+      rendered.push(rows.filter(row => row.isUser).map(row => [row.id, row.text]));
+    }
+    // The combined wire text in the session summary must not add a third row.
+    assert.deepEqual(rendered, [expected, expected]);
+    for (const changed of [
+      { ...echo, daemon_seq: 10 },
+      { ...echo, message_id: 'another-message' },
+      { ...echo, text: 'another paragraph' },
+    ]) {
+      const other = applySnapshotWithOptimisticReconciliation(state, { sessions, events: [changed] }, now + 5000);
+      assert.equal(other.events.some(item => ids.includes(item.optimistic_id ?? '')), false);
+    }
+  });
+}
 
 test('multiline notification answer renders authenticated decoded fields with original LF', () => {
   const item = JSON.parse(readFileSync(new URL('./fixtures/notification-answer-multiline.json', import.meta.url), 'utf8'));

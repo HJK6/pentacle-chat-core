@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import fixture from './fixtures/image_echo_bridge_order.json';
 import {
   applyPentacleEvent, applySnapshotWithOptimisticReconciliation, initialPentacleStreamState,
-  markOptimisticDispatchedByRequestId, selectSessionDetail, sendOptimisticMessage,
+  markOptimisticDispatchedByRequestId, recordOptimisticSendAcceptanceByRequestId,
+  selectSessionDetail, sendOptimisticMessage,
   type PentacleEvent, type PentacleStreamState,
 } from '../src/index.ts';
 
@@ -113,3 +114,25 @@ test('synthetic structured echo preserves a literal pasted_content caption compa
   assert.equal(rows(next)[0].text, caption);
   assert.equal(rows(next)[0].sendState, undefined);
 });
+
+for (const path of ['live', 'snapshot'] as const) {
+  for (const messageId of ['other-message', 'bound-message', undefined]) {
+    test(`dispatched image ${path} respects bound message identity: ${messageId ?? 'legacy no-ID'}`, () => {
+      const dispatched = markOptimisticDispatchedByRequestId(queued(), 'request-image-send', at);
+      const state = recordOptimisticSendAcceptanceByRequestId(dispatched, 'request-image-send', {
+        message_id: 'bound-message',
+      });
+      assert.equal(state.optimisticSends?.['image-send'].status, 'dispatched');
+      const echo = { ...native, message_id: messageId };
+      const next = path === 'live'
+        ? applyPentacleEvent(state, echo)
+        : applySnapshotWithOptimisticReconciliation(state, { events: [echo], sessions: state.sessions }, at + 500);
+      const rendered = rows(next);
+      const protectedSend = messageId === 'other-message';
+      assert.equal(next.optimisticSends?.['image-send']?.status, protectedSend ? 'dispatched' : undefined);
+      assert.equal(rendered.length, protectedSend ? 2 : 1);
+      assert.equal(rendered.find(row => row.optimisticId === 'image-send')?.text, fixture.caption);
+      if (protectedSend) assert.ok(rendered.some(row => row.messageId === 'other-message' && !row.optimisticId));
+    });
+  }
+}
