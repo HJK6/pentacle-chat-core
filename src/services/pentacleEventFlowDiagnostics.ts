@@ -1,4 +1,4 @@
-import { isCodexHelperSuggestion, isTransientTranscriptNoise } from './pentacleEventInterpreter';
+import { assistantDashboardLink, isHelperSuggestionEvent, isTransientTranscriptNoise } from './pentacleEventInterpreter';
 import type { PentacleEvent } from '../types/pentacle';
 
 export type PentacleEventDropReason =
@@ -43,11 +43,12 @@ export function classifyDrop(
   if (
     !isClaudeJsonlEvent(event) &&
     (kind === 'ASSIST' || kind === 'TOOL' || kind === 'TOOL-OUT') &&
-    isTransientTranscriptNoise(event.text)
+    isTransientTranscriptNoise(event.text) &&
+    !assistantDashboardLink(event)
   ) {
     return 'noise_filter';
   }
-  if (kind === 'USER' && isCodexHelperSuggestion(event.text)) return 'helper_suggestion';
+  if (isHelperSuggestionEvent(event)) return 'helper_suggestion';
   if (options.duplicate) return 'dedupe';
   return null;
 }

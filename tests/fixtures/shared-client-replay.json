@@ -1,0 +1,114 @@
+{
+  "stream": "fixture:shared-replay",
+  "send": "One optimistic fixture input",
+  "initial": {
+    "host": "fixture",
+    "provider": "codex",
+    "session_id": "shared-replay",
+    "session_name": "shared-replay",
+    "stream_id": "fixture:shared-replay",
+    "daemon_seq": 10,
+    "timestamp": "2026-05-13T12:00:10.000Z",
+    "kind": "ASSIST",
+    "text": "Opening fixture line"
+  },
+  "disconnected_replay": [
+    {
+      "host": "fixture",
+      "provider": "codex",
+      "session_id": "shared-replay",
+      "session_name": "shared-replay",
+      "stream_id": "fixture:shared-replay",
+      "daemon_seq": 14,
+      "timestamp": "2026-05-13T12:00:14.000Z",
+      "kind": "ASSIST",
+      "text": "Second lane reached its marker",
+      "message_id": "publication:lane-fixture-second",
+      "publish_kind": "lane_update",
+      "raw": {
+        "lane_update": {
+          "update_id": "lane-fixture-second",
+          "lane_id": "lane-fixture-second",
+          "kind": "milestone",
+          "summary": "Second lane reached its marker",
+          "state": "active",
+          "title": "Synthetic lane-fixture-second",
+          "ts": "2026-05-13T12:00:14.000Z"
+        }
+      }
+    },
+    {
+      "host": "fixture",
+      "provider": "codex",
+      "session_id": "shared-replay",
+      "session_name": "shared-replay",
+      "stream_id": "fixture:shared-replay",
+      "daemon_seq": 13,
+      "timestamp": "2026-05-13T12:00:12.000Z",
+      "kind": "ASSIST",
+      "text": "First lane opened",
+      "message_id": "publication:lane-fixture-first",
+      "publish_kind": "lane_update",
+      "raw": {
+        "lane_update": {
+          "update_id": "lane-fixture-first",
+          "lane_id": "lane-fixture-first",
+          "kind": "lane_started",
+          "summary": "First lane opened",
+          "state": "active",
+          "title": "Synthetic lane-fixture-first",
+          "ts": "2026-05-13T12:00:12.000Z"
+        }
+      }
+    },
+    {
+      "host": "fixture",
+      "provider": "codex",
+      "session_id": "shared-replay",
+      "session_name": "shared-replay",
+      "stream_id": "fixture:shared-replay",
+      "daemon_seq": 12,
+      "timestamp": "2026-05-13T12:00:12.000Z",
+      "kind": "ASSIST",
+      "text": "First lane opened",
+      "message_id": "publication:lane-fixture-first",
+      "publish_kind": "lane_update",
+      "raw": {
+        "lane_update": {
+          "update_id": "lane-fixture-first",
+          "lane_id": "lane-fixture-first",
+          "kind": "lane_started",
+          "summary": "First lane opened",
+          "state": "active",
+          "title": "Synthetic lane-fixture-first",
+          "ts": "2026-05-13T12:00:12.000Z"
+        }
+      }
+    },
+    {
+      "host": "fixture",
+      "provider": "codex",
+      "session_id": "shared-replay",
+      "session_name": "shared-replay",
+      "stream_id": "fixture:shared-replay",
+      "daemon_seq": 11,
+      "timestamp": "2026-05-13T12:00:11.000Z",
+      "kind": "USER",
+      "text": "One optimistic fixture input",
+      "raw": {
+        "receipt_state": "landed",
+        "receipt_delivery": "landed"
+      }
+    }
+  ],
+  "expected": [
+    "Opening fixture line",
+    "One optimistic fixture input",
+    "First lane opened",
+    "Second lane reached its marker"
+  ],
+  "lane_order": [
+    "lane-fixture-first",
+    "lane-fixture-second"
+  ]
+}

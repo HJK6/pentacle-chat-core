@@ -14,6 +14,39 @@ export type PentacleEventKind =
   | 'DRAFT'
   | string;
 
+export type PentacleAssistantPublishKind =
+  | 'prose'
+  | 'question'
+  | 'result'
+  | 'status'
+  | 'decision'
+  | 'lane_update'
+  | string;
+
+/**
+ * Daemon-declared session capabilities. Unknown additive capability keys are
+ * retained so older clients can project a newer inventory without inferring
+ * behavior from provider/name strings.
+ */
+export interface PentacleSessionCapabilities {
+  pane?: boolean;
+  terminal?: boolean;
+  assistant_composite_v1?: boolean;
+  reply_metadata_v1?: boolean;
+  [key: string]: boolean | undefined;
+}
+
+/** Additive acceptance metadata returned by the existing authenticated send. */
+export interface PentacleSendAcceptance {
+  /** Positive provider queue proof, or confirmed processing (false). */
+  provider_queued?: boolean;
+  message_id?: string | null;
+  routing_state?: string | null;
+  accepted_sequence?: number | null;
+  queue_sequence?: number | null;
+  action_committed?: boolean | null;
+}
+
 // Cross-lane attachment contract (spec
 // public protocol contract, ## Attachment model).
 // Both lanes code against this single shape: the mobile lane builds the `send`
@@ -28,7 +61,10 @@ export type PentacleEventKind =
 // type.
 export interface ChatAttachment {
   key: string; // blob sha — the durable ref the client sends on the wire.
-  mime: string; // post HEIC→transcode: "image/jpeg" | "image/png".
+  mime: string; // Canonical image or managed file MIME.
+  filename?: string; // Sanitized daemon-issued download name.
+  size?: number; // Daemon-verified managed file byte count.
+  upload_id?: string; // Server provenance identifier, not authority.
   width?: number; // px, for bubble layout.
   height?: number; // px, for bubble layout.
   bytes?: number; // size after client-side compression.
@@ -39,6 +75,14 @@ export interface ChatAttachment {
 // composer (enforce before upload) and the daemon (reject over-limit sends) use
 // the same bound.
 export const MAX_CHAT_ATTACHMENTS = 5;
+
+/** Daemon-authenticated registry tag; clients render by kind, never by wire regex. */
+export interface PentacleMessageEnvelope {
+  kind: string;
+  id: string;
+  schema_version: 1;
+  [key: string]: unknown;
+}
 
 export interface PentacleEvent {
   daemon_seq: number;
@@ -51,11 +95,28 @@ export interface PentacleEvent {
   kind: PentacleEventKind;
   text: string;
   raw?: Record<string, unknown>;
+  message_envelope?: PentacleMessageEnvelope;
+  /** Grammar provenance at authenticated provider ingress; text is already unwrapped. */
+  provider_wrapper?: { kind: 'claude_pasted_content'; id: string; provenance: 'grammar' };
   jsonl_record_uuid?: string;
   jsonl_resolution_for_record_uuid?: string;
   client_origin?: boolean;
   optimistic_id?: string;
+  request_id?: string;
+  receipt_id?: string;
   receiptDirectMatch?: boolean;
+  /** Stable daemon event/message identity used by Reply actions. */
+  event_id?: string | null;
+  message_id?: string | null;
+  reply_to_message_id?: string | null;
+  reply_to_question_id?: string | null;
+  lane_id?: string | null;
+  publish_kind?: PentacleAssistantPublishKind | null;
+  routing_state?: string | null;
+  accepted_sequence?: number | null;
+  queue_sequence?: number | null;
+  action_committed?: boolean | null;
+  provider_queued?: boolean;
   correlatedDaemonSeq?: number | null;
   pending?: boolean;
   created_at?: number;
@@ -64,6 +125,33 @@ export interface PentacleEvent {
   // rendered bubbles). FIFO order is preserved and mirrors the order the daemon
   // names the paths in its inject instruction line.
   attachments?: ChatAttachment[];
+  // Durable send metadata persisted on a USER event. `voice` marks a message
+  // that was dictated (transcribed on the daemon), so the mic-glyph + duration
+  // caption survives reload/reconcile. Echoed by the daemon; ignored elsewhere.
+  meta?: PentacleSendMeta;
+}
+
+/** Additive, durable per-message send metadata (voice-input lane). */
+export interface PentacleSendMeta {
+  voice?: {
+    duration_s: number;
+    // Bounded observed UI context, additive and safe for older daemons to ignore.
+    // IDs refer only to public app entities. This is untrusted context, never routing.
+    context_v1?: {
+      visits: Array<{ offset_ms: number; page_id: string; title: string; entity_id?: string; question_id?: string }>;
+      truncated?: true;
+    };
+  };
+  // P6 `voice_answers.v1`: the questions one overlay recording is bound to (client -> daemon).
+  voice_answers?: {
+    version: number;
+    recording_id: string;
+    blob_sha: string;
+    duration_s: number;
+    items: Array<Record<string, unknown>>;
+  };
+  // The daemon's binding verdict, written onto the stored USER event of the turn (daemon -> client).
+  voice_answers_status?: { state: 'bound' | 'dropped'; reason?: string; stale_keys?: string[] };
 }
 
 export interface PentacleHostStatus {
@@ -83,6 +171,9 @@ export interface PentacleHostStatus {
 export interface PentacleMachineStats {
   host: string;
   cpu_load_1m: number;
+  // Additive wire-v1 field. Absent from legacy producers; null means the
+  // current producer could not measure CPU utilization.
+  cpu_usage_pct?: number | null;
   memory_used_bytes: number;
   memory_total_bytes: number;
   disk_used_bytes: number;
@@ -119,6 +210,8 @@ export interface PentacleSpecStatusCapability {
 // (public-session-status-card). The daemon stamps updated_at
 // on every successful write; all other fields are optional partial state.
 export interface SessionStatusCard {
+  eta_at?: string | null;
+  eta_set_at?: string | null;
   goal?: string;
   plan?: SessionStatusCardStep[];
   update?: string;
@@ -145,11 +238,13 @@ export interface PentacleLastTextProvenance {
 }
 
 export interface PentacleSessionSummary {
+  assistant_activity?: AssistantActivitySnapshot;
   agents?: ChildAgent[];
   // Daemon-projected session role (e.g. "nexus"). Mobile gates the Sub-agents roster and the
   // chat-row history affordance on role === "nexus"; the daemon passes it through unchanged.
   role?: string | null;
   objective?: string | null;
+  session_kind?: string | null;
   session_generation?: string;
   stream_id: string;
   host: string;
@@ -160,6 +255,7 @@ export interface PentacleSessionSummary {
   display_name?: string;
   title?: string;
   visibility?: string;
+  capabilities?: PentacleSessionCapabilities | null;
   last_event_at: string;
   last_text: string;
   last_text_provenance?: PentacleLastTextProvenance | null;
@@ -168,6 +264,10 @@ export interface PentacleSessionSummary {
   pending: boolean;
   working: boolean;
   working_label?: string;
+  // Existing daemon capture metadata: transport_unknown is not checked idle.
+  capture_liveness?: string;
+  eta_at?: string | null;
+  eta_set_at?: string | null;
   // Canonical daemon lifecycle for newly admitted sessions. Older daemons and
   // legacy rows may omit it or project a non-modern compatibility value.
   bootstrap_state?: 'queued' | 'starting' | 'ready' | 'failed' | string | null;
@@ -342,6 +442,10 @@ export interface PentacleNotification {
   updated_at: string;
   producer: string;
   answer_to_stream_id?: string | null;
+  // The chat that shows this notification when it is not the producer's own
+  // (a hidden bound assistant's question surfaces in its composite chat).
+  // Display only: answers are addressed by notification/question id.
+  surfaced_to_stream_id?: string | null;
   severity: NotificationSeverity;
   title: string;
   body: string;
@@ -371,7 +475,34 @@ export interface WorkingTaskSummary {
   open: number;
 }
 
+export type AssistantResponseState = 'queued' | 'routing' | 'awaiting_reply' | 'acknowledged' | 'answered' | 'reply_received' | 'waiting_for_operator' | 'waiting_for_dependency' | 'failed' | 'uncertain' | 'cancelled';
+
+export interface AssistantInputActivity {
+  message_id: string;
+  accepted_at: string;
+  first_visible_at: string | null;
+  final_visible_at: string | null;
+  reply_latency_ms: number | null;
+  final_latency_ms: number | null;
+  response_state: AssistantResponseState;
+  work_state: 'unknown' | 'discussion' | 'in_progress' | 'waiting' | 'outcome_reported' | 'closed' | 'cancelled';
+  error_code?: string | null;
+  dispatch_id?: string | null;
+  lane_ids?: string[];
+  publication_ids?: string[];
+}
+
+export interface AssistantActivitySnapshot {
+  version: 1;
+  pending_count: number;
+  waiting_for_operator_count: number;
+  oldest_pending_at: string | null;
+  inputs: Record<string, AssistantInputActivity>;
+  has_more: boolean;
+}
+
 export interface WorkingStateData {
+  assistant_activity?: AssistantActivitySnapshot;
   stream_id: string;
   timestamp: string;
   tokens_input: number;
@@ -427,10 +558,20 @@ export type OptimisticSendStatus =
 export type PentacleSendState = 'queued' | 'sending' | 'failed' | 'cancelled';
 
 export interface OptimisticSendState {
+  // Optional captured destination lifetime. Kept through reconnect/retry/rekey;
+  // null means the original inventory did not carry a generation.
+  origin_generation?: string | null;
   optimistic_id: string;
   request_id: string;
   stream_id: string;
   text: string;
+  reply_to_message_id?: string;
+  reply_to_question_id?: string;
+  message_id?: string;
+  routing_state?: string;
+  accepted_sequence?: number;
+  queue_sequence?: number;
+  action_committed?: boolean;
   status: OptimisticSendStatus;
   created_at: number;
   dispatched_at?: number;
@@ -450,6 +591,12 @@ export interface OptimisticSendState {
   // stream returns to idle. Absent/false for an ordinary in-flight send.
   turn_queued?: boolean;
   queued_at?: number;
+  // The daemon confirmed landing (send.result delivery 'landed') while the
+  // provider holds the prompt in its own native queue (provider_queued: true).
+  // Distinct from turn_queued (client-side hold): it never gates a flush and
+  // does not change PentacleSendState; it only drives the 'queued' receipt
+  // caption until the correlated USER echo arrives.
+  provider_queued?: boolean;
   // Image attachments the user sent with this message (spec ## Attachment
   // model). Populated on the optimistic send so the queued/sending bubble can
   // render thumbnails before the daemon echoes the message back. FIFO order.
@@ -530,6 +677,9 @@ export interface PentacleStreamState {
   // incrementally to bucket/index accessors.
   eventBucketsByStream?: Record<string, PentacleEventBucket>;
   eventBucketMutationRevision?: number;
+  // Streams whose operator paged older history; their per-stream event cap is
+  // lifted so the older pages are not the first rows evicted.
+  historyExpandedStreamIds?: readonly string[];
   drafts: Record<string, PentacleEvent>;
   hosts: Record<string, PentacleHostStatus>;
   machineStats: Record<string, PentacleMachineStats>;
@@ -550,4 +700,329 @@ export interface PentacleStreamState {
   // the events array identity matches. Entry is removed when the stream is
   // closed or no longer present in the latest session inventory.
   eventContentVersionByStream?: Record<string, number>;
+  // Work-lanes projection v1: the daemon-owned, already-ordered lane list for
+  // the header and lanes surface. Null/absent until a daemon that advertises
+  // lanes sends one. Never derived from sessions.
+  workLanes?: WorkLanesInventory | null;
 }
+
+export type WorkLaneState = 'active' | 'paused' | 'blocked' | 'done';
+export type WorkLaneOwnerKind = 'operator' | 'fd';
+export type WorkLaneChatAvailability = 'open' | 'history' | 'unavailable';
+export type WorkLaneUpdateKind =
+  | 'major_decision'
+  | 'lane_started'
+  | 'lane_completed'
+  | 'lane_blocked'
+  | 'lane_unblocked'
+  | 'milestone';
+
+export interface WorkLaneLead {
+  stream_id: string;
+  generation: string;
+  qualifies: boolean;
+  status: string;
+  visibility: string;
+  presence: {
+    online: boolean;
+    working: boolean;
+    capture_liveness: string;
+    last_activity: string | null;
+  };
+  status_card: {
+    goal: string | null;
+    active_step: string | null;
+    update: string | null;
+    eta_at: string | null;
+    eta_set_at: string | null;
+    updated_at: string | null;
+  };
+  /** Daemon-computed: render "ETA stale" instead of "late Xm" when true. */
+  eta_stale: boolean;
+}
+
+export interface WorkLaneVisibleChat {
+  stream_id: string;
+  generation: string | null;
+  kind: 'composite' | 'session';
+  available: WorkLaneChatAvailability;
+}
+
+/** Coarse work estimate in hours, never a remaining-time forecast. */
+export interface WorkLaneEstimate {
+  p25: number;
+  p75: number;
+  median: number;
+  provisional?: boolean;
+}
+
+export type WorkLaneObservationQuality = 'fresh' | 'stale' | 'error' | 'missing' | 'ambiguous';
+
+export interface WorkLaneObservation {
+  quality: WorkLaneObservationQuality;
+  observed_at?: string | null;
+  error?: string | null;
+}
+
+export interface WorkLaneRecent {
+  at: string;
+  spec_id: string;
+  kind: 'note' | 'checks' | 'done' | 'blocked';
+  text?: string | null;
+  count?: number;
+}
+
+/** Optional facts stay absent when an older or malformed projection omits them. */
+export type WorkLaneActivity = 'working' | 'waiting_on_dot' | 'waiting_on_you' | 'blocked' | 'idle';
+export interface WorkLaneExternal {
+  label: string;
+  working: number;
+  queued: number;
+  review: number;
+  verified_at: string;
+}
+export interface WorkLaneMemberExternal {
+  label: string;
+  ref: string;
+  state: 'working' | 'queued' | 'review';
+  verified_at: string;
+}
+export interface WorkLaneLatestEvent {
+  kind: 'review_passed' | 'review_failed' | 'reported_done';
+  at: string;
+}
+
+export interface WorkLaneMember {
+  /** Detail-only packet work and latest reported milestone; absent from inventory previews. */
+  external?: WorkLaneMemberExternal[];
+  latest_event?: WorkLaneLatestEvent | null;
+  [field: string]: unknown;
+  spec_id: string;
+  goal_id?: string | null;
+  title?: string | null;
+  status?: string | null;
+  terminal?: 'completed' | 'deprecated' | null;
+  ac_checked?: number | null;
+  ac_total?: number | null;
+  estimate?: WorkLaneEstimate | null;
+  status_text?: string | null;
+  next_action_text?: string | null;
+  source_changed_at?: string | null;
+  observation?: WorkLaneObservation;
+  obs_rev?: number;
+  /** Seats whose work assignment is this spec; activity is an observation, never progress. */
+  seats?: WorkLaneSeat[];
+  seats_total?: number;
+  open_questions?: { count: number; first_question_id: string | null };
+  worked?: { elapsed_h: number | null; censored: boolean; active_h: number | null; seats: number; qa_rounds: number; as_of: string } | null;
+  criteria?: Array<{ title: string; disposition: 'open' | 'done' | 'waived' | 'tracked' | 'parked' }>;
+  transitions?: Array<{ status: string; at: string }>;
+  lead_seat?: { stream_id: string; host: string; provider: string | null; activity: WorkLaneSeat['activity']; eta_at: string | null; active_step: string | null } | null;
+  estimate_exempt?: boolean;
+  status_line?: string | null;
+  next_line?: string | null;
+  blocked_line?: string | null;
+  summary_line?: string | null;
+  progress_at?: string | null;
+  estimate_first?: Pick<WorkLaneEstimate, 'p25' | 'p75' | 'median'> | null;
+  unblocks?: Array<{ spec_id: string; title: string }>;
+  recent?: WorkLaneRecent[];
+}
+
+export interface WorkLaneSeat {
+  stream_id: string;
+  role: string | null;
+  host: string | null;
+  visibility: string | null;
+  activity: 'working' | 'idle' | 'offline' | 'unknown';
+  last_activity: string | null;
+}
+
+export interface WorkLaneAggregates {
+  items_total?: number;
+  items_completed?: number;
+  items_dropped?: number;
+  items_open?: number;
+  items_unresolved?: number;
+  ac_checked?: number | null;
+  ac_total?: number | null;
+  ac_members?: number;
+  open_estimate_h?: WorkLaneEstimate | null;
+  open_estimated?: number;
+  estimate_complete?: boolean;
+}
+
+export interface WorkIndex {
+  available: boolean;
+  root_configured?: boolean;
+  snapshot_at?: string | null;
+  last_sweep_at?: string | null;
+  error?: string | null;
+}
+
+export type WorkLaneGoalState = 'in_progress' | 'not_started' | 'done';
+export interface WorkLaneDefaultGoal {
+  state: WorkLaneGoalState;
+  done: number;
+  total: number;
+  moving?: number;
+  blocked?: number;
+  working?: boolean;
+  left_h?: number | null;
+  progress_at?: string | null;
+  summary_line?: string | null;
+  recent?: WorkLaneRecent[];
+}
+export interface WorkLaneGoal extends WorkLaneDefaultGoal {
+  goal_id: string;
+  title: string;
+  rank: number;
+  target_date?: string;
+  icon?: import('../services/laneIcons').LaneIconKey | null;
+  /** Zero-based index in the lane's `goal_road`; present only while that road is valid. */
+  pos?: number;
+}
+
+/** An on-hold lane. Absent means not parked; the lane state stays one of the accepted values. */
+export interface WorkLaneParked {
+  at: string | null;
+  reason: string | null;
+}
+
+export interface WorkLane extends WorkLaneAggregates {
+  activity?: string | null;
+  hue?: string | null;
+  visibility_counts?: Record<string, unknown>;
+  selected_goal?: WorkLaneGoal;
+  external?: WorkLaneExternal;
+  lane_id: string;
+  icon?: string | null;
+  title: string;
+  summary: string;
+  /** Presented state; `done` never appears in the header list. */
+  state: WorkLaneState;
+  state_reason: string;
+  blocker: string | null;
+  owner_kind: WorkLaneOwnerKind | null;
+  version: number;
+  updated_at: string;
+  first_admitted_at: string | null;
+  done_at: string | null;
+  lead: WorkLaneLead | null;
+  visible_chat: WorkLaneVisibleChat;
+  last_update: { update_id: string; kind: WorkLaneUpdateKind; event_id: number; ts: string } | null;
+  members?: WorkLaneMember[];
+  members_total?: number;
+  members_next?: string | null;
+  progress?: WorkLaneProgress | null;
+  goals?: WorkLaneGoal[];
+  goals_total?: number;
+  default_goal?: WorkLaneDefaultGoal | null;
+  detail_revision?: string;
+  no_spec_reason?: string | null;
+  freshness_at?: string | null;
+  goal_classes?: string | null;
+  goal_counts?: readonly number[] | null;
+  /** One class letter per named goal of the lane, in goal order, excluding the default goal. */
+  goal_road?: string | null;
+  parked?: WorkLaneParked;
+  progress_at?: string | null;
+  state_at?: string | null;
+  recent?: WorkLaneRecent[];
+}
+
+/** Legacy nested view of the normalized progress fields for list consumers. */
+export type WorkLaneProgress = {
+  members: (WorkLaneMember & { seats: WorkLaneSeat[] })[];
+  members_total: number | null;
+  members_next: string | null;
+  no_spec_reason: string | null;
+  items_total: number | null;
+  items_completed: number | null;
+  items_dropped: number | null;
+  items_open: number | null;
+  items_unresolved: number | null;
+  ac_checked: number | null;
+  ac_total: number | null;
+  ac_members: number | null;
+  open_estimate_h: Pick<WorkLaneEstimate, 'p25' | 'p75' | 'median'> | null;
+  open_estimated: number | null;
+  estimate_complete: boolean | null;
+  freshness_at: string | null;
+};
+
+export interface WorkLanesInventory {
+  lanes: WorkLane[];
+  counts: { open: number; active: number; paused: number; blocked: number };
+  truncated: boolean;
+  generated_at: string | null;
+  work_index?: WorkIndex | null;
+}
+
+export interface WorkLaneLogUpdate {
+  update_id: string;
+  spec_id?: string | null;
+  kind: WorkLaneUpdateKind;
+  event_id: string | number | null;
+  created_at: string;
+  ts: string;
+  /** Null means the view must use kind/time metadata, not invented prose. */
+  summary: string | null;
+}
+
+export interface WorkLaneLogEvent {
+  event_id: string;
+  created_at: string;
+  operation: string;
+  summary: string | null;
+}
+
+export interface WorkLaneSpecChange {
+  event_id: string;
+  created_at: string;
+  spec_id: string;
+  title: string;
+  field: 'status' | 'ac' | 'estimate';
+  before: string;
+  after: string;
+  obs_rev?: number;
+}
+
+export interface WorkLaneShow {
+  lane_id: string;
+  projection: WorkLane | null;
+  members: WorkLaneMember[];
+  members_total?: number;
+  members_next?: string | null;
+  recent?: WorkLaneRecent[];
+  detail_revision?: string;
+  work_index?: WorkIndex;
+  updates: WorkLaneLogUpdate[];
+  spec_changes: WorkLaneSpecChange[];
+  /** Other audit events; item_change events are expanded in spec_changes. */
+  events: WorkLaneLogEvent[];
+}
+
+export interface WorkLaneShowOptions {
+  members_limit?: number;
+  members_after?: string;
+  goal_id?: string;
+}
+
+export interface WorkLaneUpdate {
+  update_id: string;
+  lane_id: string;
+  kind: WorkLaneUpdateKind;
+  summary: string;
+  source: { type: string; id: string; grouped_ids?: string[] };
+  state: WorkLaneState | null;
+  prior_state: WorkLaneState | null;
+  owner_kind: WorkLaneOwnerKind | null;
+  title: string;
+  ts: string;
+}
+
+export type WorkLaneTap =
+  | { action: 'open_chat'; stream_id: string }
+  | { action: 'history'; stream_id: string; generation: string }
+  | { action: 'unavailable' };

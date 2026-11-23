@@ -1,4 +1,5 @@
 import { decodeChildAgents } from "./daemonUpdates";
+import { applyWorkLanesInventory } from './workLanes';
 import { dedupeRecentEventsByStream, mergeProgressiveUpdate } from './pentacleEventUtils';
 import {
   appendLiveEventProjection,
@@ -8,14 +9,19 @@ import {
   replacePentacleEventProjection,
   selectPentacleDerivedEventIndex,
 } from './pentacleEventBuckets';
-import { optimisticMatchesServerUser, parseServerEventTimeStrict } from './optimisticMatch';
-import { isCodexHelperSuggestion, isTerminalDividerText, isTransientTranscriptNoise } from './pentacleEventInterpreter';
+import {
+  findMatchingCompositeQueuedOptimisticIds,
+  optimisticMatchesServerUser,
+  parseServerEventTimeStrict,
+} from './optimisticMatch';
+import { assistantDashboardLink, hasExplicitUserSendBinding, trustedDaemonNoticeProjection, isHelperSuggestionEvent, isTerminalDividerText, isTransientTranscriptNoise } from './pentacleEventInterpreter';
 import { normalizePentacleHost } from './pentacleHosts';
 import { logTelemetry } from '../utils/telemetry';
 import { TELEMETRY_EVENTS } from '../utils/telemetryEvents';
 import type {
   ChatAttachment,
   EndReason,
+  PentacleSendAcceptance,
   OptimisticSendState,
   PentacleEvent,
   PentacleHostStatus,
@@ -45,7 +51,7 @@ export const OPTIMISTIC_SNAPSHOT_RECONCILE_WINDOW_MS = 60_000;
 // grace, applyPentacleSessionInventory + applyPentacleSnapshotMessage drop
 // the optimistic and the subsequent USER chat.event arrives to an empty
 // optimisticSends map — reconcile silently misses. Spec:
-// public-inventory-wipes-recent-optimistic.
+// spec_pentacle_mobile_inventory_wipes_recent_optimistic_2026_05_17.
 export const OPTIMISTIC_INVENTORY_GRACE_MS = 60_000;
 
 // Event immutability contract (Stage 5a).
@@ -105,9 +111,9 @@ export const initialPentacleStreamState: PentacleStreamState = {
 // provider just end a turn?" Used by the reducer to transition workingByStream
 // to `phase: 'idle'`. Covers:
 //   - Claude jsonl: SYSTEM event with raw.subtype='turn-summary' (from
-//     daemon transport turn_duration record).
+//     pentacle/services/chat-stream/claude_jsonl.py turn_duration record).
 //   - Codex pane parse: SYSTEM event with text '─ Worked for ...' or '────────'
-//     (from daemon transport _parse_pane_events).
+//     (from pentacle/services/chat-stream/chat_streamd.py _parse_pane_events).
 //   - Any provider emitting subtype/displayRule='terminal-divider' or
 //     'activity:turn-summary' in raw.
 export function isSystemEndOfTurnEvent(event: PentacleEvent | null | undefined) {
@@ -143,7 +149,7 @@ function streamEventKey(event: PentacleEvent) {
 // request_stream_events backfill derivation; 'resync' = the snapshot/inventory
 // reconcile. Emitted as `chat:turn_phase_derived` so the otherwise-invisible
 // turn-phase derivation is observable for diagnosis + validation
-// (turn-phase-derived).
+// (spec_pentacle_mobile__chat_detail_working_indicator_missing_2026_06_16).
 type TurnPhaseSource = 'fetch' | 'live' | 'resync';
 
 interface TurnPhaseDerivation {
@@ -161,6 +167,11 @@ type OptimisticOrphanTelemetryRecord = {
 };
 
 const optimisticOrphanTelemetryById = new Map<string, OptimisticOrphanTelemetryRecord>();
+const canonicalAttachmentEchoTelemetry = new Set<string>();
+
+export function resetCanonicalAttachmentEchoTelemetryForTests() {
+  canonicalAttachmentEchoTelemetry.clear();
+}
 
 export function resetOptimisticOrphanTelemetryForTests() {
   optimisticOrphanTelemetryById.clear();
@@ -386,7 +397,7 @@ function withTurnTransition(
 // ground truth: the all-chats LIST derives its row status from that flag, but
 // the chat-DETAIL spinner + composer lock read workingByStream. Without this a
 // resync updates the list to idle while the detail stays "working" with the
-// composer locked (public protocol contract).
+// composer locked (chat_detail_stale_working_flag_2026_06_15).
 //
 // Only a 'working' turn (server-acknowledged: an event already advanced it past
 // 'pending') is closed here, mirroring the falling-edge close in
@@ -400,12 +411,16 @@ function reconcileWorkingByStreamForResync(
   sessions: PentacleSessionSummary[],
   survivingStreamIds: Set<string>,
   now: number,
+  previousSessions: Map<string, PentacleSessionSummary>,
 ): Record<string, TurnState> {
-  const daemonWorking = new Map(sessions.map((session) => [session.stream_id, Boolean(session.working)]));
+  const daemonSessions = new Map(sessions.map((session) => [session.stream_id, session]));
   const next: Record<string, TurnState> = {};
   for (const [streamId, turn] of Object.entries(previous ?? {})) {
     if (!survivingStreamIds.has(streamId)) continue;
-    if (turn.phase === 'working' && daemonWorking.get(streamId) === false) {
+    const previousGeneration = previousSessions.get(streamId)?.session_generation;
+    const nextGeneration = daemonSessions.get(streamId)?.session_generation;
+    if (previousGeneration && nextGeneration && previousGeneration !== nextGeneration) continue;
+    if (turn.phase === 'working' && daemonSessions.get(streamId)?.working === false) {
       next[streamId] = { ...turn, phase: 'idle', endReason: 'working_false', endedAt: now };
       emitTurnPhaseDerived(streamId, 'idle', 'resync', null);
       continue;
@@ -413,6 +428,23 @@ function reconcileWorkingByStreamForResync(
     next[streamId] = turn;
   }
   return next;
+}
+
+// A restart adopts durable rows before a generation has a checked pane
+// observation. Its explicit unknown false cannot settle an established turn.
+function resyncSessionSummary(
+  incoming: PentacleSessionSummary,
+  previous: PentacleSessionSummary | undefined,
+  turn: TurnState | undefined,
+): PentacleSessionSummary {
+  const summary = stripTransientSummary(normalizeSession(incoming), previous);
+  if (summary.working === false && summary.capture_liveness === 'transport_unknown'
+    && summary.pane_status !== 'pane_dead'
+    && summary.session_generation && summary.session_generation === previous?.session_generation
+    && turn?.phase === 'working') {
+    return { ...summary, working: true, working_label: previous.working_label };
+  }
+  return summary;
 }
 
 export function beginPentacleTurn(
@@ -440,6 +472,23 @@ function sessionForStream(state: PentacleStreamState, streamId: string) {
   return state.sessions.find((item) => item.stream_id === streamId);
 }
 
+function assistantCompositeStreamIds(sessions: readonly PentacleSessionSummary[]) {
+  return new Set(
+    sessions
+      .filter((session) => session.session_kind === 'assistant_composite')
+      .map((session) => session.stream_id),
+  );
+}
+
+// Streams whose per-stream event cap is lifted: assistant composites, plus
+// streams whose operator explicitly paged older history (the older pages would
+// otherwise be the first rows the cap evicts).
+function uncappedStreamIds(state: PentacleStreamState, sessions: readonly PentacleSessionSummary[] = state.sessions) {
+  const ids = assistantCompositeStreamIds(sessions);
+  for (const streamId of state.historyExpandedStreamIds ?? []) ids.add(streamId);
+  return ids;
+}
+
 function optimisticEventFromSend(
   state: PentacleStreamState,
   send: OptimisticSendState,
@@ -461,6 +510,13 @@ function optimisticEventFromSend(
     created_at: send.created_at,
     ...(send.queued_at !== undefined ? { queued_at: send.queued_at } : {}),
     ...(send.attachments ? { attachments: send.attachments } : {}),
+    ...(send.reply_to_message_id ? { reply_to_message_id: send.reply_to_message_id } : {}),
+    ...(send.reply_to_question_id ? { reply_to_question_id: send.reply_to_question_id } : {}),
+    ...(send.message_id ? { message_id: send.message_id } : {}),
+    ...(send.routing_state ? { routing_state: send.routing_state } : {}),
+    ...(send.accepted_sequence !== undefined ? { accepted_sequence: send.accepted_sequence } : {}),
+    ...(send.queue_sequence !== undefined ? { queue_sequence: send.queue_sequence } : {}),
+    ...(send.action_committed !== undefined ? { action_committed: send.action_committed } : {}),
   };
 }
 
@@ -576,6 +632,13 @@ function synthesizedReturnedSendFromEvent(
     reconnect_count: 0,
     turn_queued: false,
     ...(event.attachments ? { attachments: event.attachments } : {}),
+    ...(event.reply_to_message_id ? { reply_to_message_id: event.reply_to_message_id } : {}),
+    ...(event.reply_to_question_id ? { reply_to_question_id: event.reply_to_question_id } : {}),
+    ...(event.message_id ? { message_id: event.message_id } : {}),
+    ...(event.routing_state ? { routing_state: event.routing_state } : {}),
+    ...(event.accepted_sequence != null ? { accepted_sequence: event.accepted_sequence } : {}),
+    ...(event.queue_sequence != null ? { queue_sequence: event.queue_sequence } : {}),
+    ...(event.action_committed != null ? { action_committed: event.action_committed } : {}),
   };
 }
 
@@ -643,6 +706,52 @@ function updateOptimisticSendByRequestId(
   return updateOptimisticSend(state, state.optimisticByRequestId?.[requestId], update);
 }
 
+/**
+ * Record additive metadata from the existing send acceptance/receipt path.
+ * `optimistic_id` remains the client input identity; request ids may rotate on
+ * reconnect/retry and are deliberately not changed here. The same metadata is
+ * copied onto the optimistic event so transcript Reply actions can use it
+ * before a durable USER echo arrives.
+ */
+export function recordOptimisticSendAcceptanceByRequestId(
+  state: PentacleStreamState,
+  requestId: string,
+  acceptance: PentacleSendAcceptance,
+): PentacleStreamState {
+  const optimisticId = state.optimisticByRequestId?.[requestId];
+  const current = optimisticId ? state.optimisticSends?.[optimisticId] : undefined;
+  if (!optimisticId || !current) return state;
+
+  const nextSend: OptimisticSendState = { ...current };
+  // A late queue receipt cannot revive a terminal or already processing row.
+  if (acceptance.provider_queued !== undefined
+      && current.provider_queued !== false
+      && !['failed', 'cancelled', 'returned_to_prompt', 'echoed', 'reconciled'].includes(current.status)) {
+    nextSend.provider_queued = acceptance.provider_queued;
+  }
+  if (acceptance.message_id != null) nextSend.message_id = acceptance.message_id;
+  if (acceptance.routing_state != null) nextSend.routing_state = acceptance.routing_state;
+  if (acceptance.accepted_sequence != null) nextSend.accepted_sequence = acceptance.accepted_sequence;
+  if (acceptance.queue_sequence != null) nextSend.queue_sequence = acceptance.queue_sequence;
+  if (acceptance.action_committed != null) nextSend.action_committed = acceptance.action_committed;
+  const withSend = withOptimisticSend(state, nextSend);
+  const eventIndex = withSend.events.findIndex((event) => event.optimistic_id === optimisticId);
+  if (eventIndex < 0) return withSend;
+
+  const priorEvent = withSend.events[eventIndex];
+  const nextEvent: PentacleEvent = { ...priorEvent };
+  if (nextSend.provider_queued !== undefined) nextEvent.provider_queued = nextSend.provider_queued;
+  if (acceptance.message_id != null) nextEvent.message_id = acceptance.message_id;
+  if (acceptance.routing_state != null) nextEvent.routing_state = acceptance.routing_state;
+  if (acceptance.accepted_sequence != null) nextEvent.accepted_sequence = acceptance.accepted_sequence;
+  if (acceptance.queue_sequence != null) nextEvent.queue_sequence = acceptance.queue_sequence;
+  if (acceptance.action_committed != null) nextEvent.action_committed = acceptance.action_committed;
+  if (nextEvent === priorEvent) return withSend;
+  const events = withSend.events.slice();
+  events[eventIndex] = freezeEventInDev(nextEvent);
+  return replacePentacleEventProjection(withSend, events);
+}
+
 export function sendOptimisticMessage(
   state: PentacleStreamState,
   args: {
@@ -655,6 +764,8 @@ export function sendOptimisticMessage(
     windowStartedAt?: number | null;
     socketGeneration?: number;
     attachments?: ChatAttachment[];
+    replyToMessageId?: string;
+    replyToQuestionId?: string;
     beginTurn?: boolean;
   },
 ): PentacleStreamState {
@@ -670,6 +781,8 @@ export function sendOptimisticMessage(
     socket_generation: args.socketGeneration,
     reconnect_count: 0,
     ...(args.attachments ? { attachments: args.attachments } : {}),
+    ...(args.replyToMessageId ? { reply_to_message_id: args.replyToMessageId } : {}),
+    ...(args.replyToQuestionId ? { reply_to_question_id: args.replyToQuestionId } : {}),
   };
   const event = optimisticEventFromSend(state, send);
   const withSend = withOptimisticSend(state, send);
@@ -693,6 +806,8 @@ export function enqueueOptimisticMessage(
     createdAt: number;
     queuedAt: number;
     attachments?: ChatAttachment[];
+    replyToMessageId?: string;
+    replyToQuestionId?: string;
   },
 ): PentacleStreamState {
   return sendOptimisticMessage(state, {
@@ -705,6 +820,8 @@ export function enqueueOptimisticMessage(
     windowStartedAt: null,
     beginTurn: false,
     ...(args.attachments ? { attachments: args.attachments } : {}),
+    ...(args.replyToMessageId ? { replyToMessageId: args.replyToMessageId } : {}),
+    ...(args.replyToQuestionId ? { replyToQuestionId: args.replyToQuestionId } : {}),
   });
 }
 
@@ -733,24 +850,44 @@ export function markOptimisticDispatchedByRequestId(
   dispatchedAt: number,
   socketGeneration?: number,
 ): PentacleStreamState {
-  return updateOptimisticSendByRequestId(state, requestId, (send) => ({
-    ...send,
-    status: 'dispatched',
-    dispatched_at: dispatchedAt,
-    window_started_at: send.window_started_at ?? dispatchedAt,
-    socket_generation: socketGeneration ?? send.socket_generation,
-  }));
+  return updateOptimisticSendByRequestId(state, requestId, (send) => {
+    // The send bridge promise resolves after the daemon's send.result frame, so
+    // dispatch must only advance a still-unacknowledged send: never regress
+    // acked/indeterminate/echoed/reconciled or a terminal failed/cancelled row.
+    if (send.status !== 'queued' && send.status !== 'dispatched') return null;
+    return {
+      ...send,
+      status: 'dispatched',
+      dispatched_at: dispatchedAt,
+      window_started_at: send.window_started_at ?? dispatchedAt,
+      socket_generation: socketGeneration ?? send.socket_generation,
+    };
+  });
+}
+
+// The provider holds this prompt in its native queue. Never cleared by a later
+// plain ack/dispatch: only the correlated USER echo (which drops the optimistic
+// row) ends it.
+export function markOptimisticProviderQueuedByRequestId(
+  state: PentacleStreamState,
+  requestId: string,
+): PentacleStreamState {
+  return updateOptimisticSendByRequestId(state, requestId, (send) => (
+    send.provider_queued === true ? null : { ...send, provider_queued: true }
+  ));
 }
 
 export function markOptimisticAckedByRequestId(
   state: PentacleStreamState,
   requestId: string,
   ackedAt: number,
+  opts: { providerQueued?: boolean } = {},
 ): PentacleStreamState {
   return updateOptimisticSendByRequestId(state, requestId, (send) => ({
     ...send,
     status: 'acked',
     acked_at: ackedAt,
+    ...(opts.providerQueued === true ? { provider_queued: true } : {}),
   }));
 }
 
@@ -824,6 +961,7 @@ export function retryOptimisticSend(
       turn_queued: false,
       failed_at: undefined,
       failure_reason: undefined,
+      provider_queued: undefined,
     };
   });
   if (reArmed === state) return state;
@@ -831,7 +969,7 @@ export function retryOptimisticSend(
     reArmed,
     reArmed.events.map((event) => (
       event.optimistic_id === optimisticId
-        ? { ...event, pending: true }
+        ? { ...event, pending: true, provider_queued: undefined }
         : event
     )),
   );
@@ -943,12 +1081,13 @@ export function reconcileOptimisticSendWithServerEvent(
     return markOptimisticReturnedToPromptByOptimisticId(state, optimisticId, Date.now());
   }
   const echoed = markOptimisticEchoedByOptimisticId(state, optimisticId, Date.now());
+  const priorEvent = state.events.find((event) => event.optimistic_id === optimisticId);
   const correlatedEvent = reconciledOptimisticEvent(
     optimisticId,
     serverEvent,
     state.optimisticSends?.[optimisticId]?.attachments,
     state.optimisticSends?.[optimisticId]?.queued_at,
-    undefined,
+    priorEvent,
     state.optimisticSends?.[optimisticId]?.text,
   );
   const withServerEvent = applyPentacleEvent(echoed, correlatedEvent);
@@ -1034,8 +1173,18 @@ export function serverUserEchoMatchesAttachmentWrapper(
   if (!ATTACHMENT_WRAPPER_MARKER.test(raw)) return false;
   const haystack = raw.toLowerCase();
   if (!keys.every((key) => haystack.includes(key))) return false;
+  const trimmedCaption = String(caption || '').trim().normalize('NFC');
+  return trimmedCaption ? raw.normalize('NFC').includes(trimmedCaption) : true;
+}
+
+function isCanonicalOnlyAttachmentEcho(
+  attachments: ChatAttachment[] | undefined,
+  caption: string | undefined,
+  eventText: string,
+) {
   const trimmedCaption = String(caption || '').trim();
-  return trimmedCaption ? raw.includes(trimmedCaption) : true;
+  return trimmedCaption.length > 0 && !eventText.includes(trimmedCaption) &&
+    serverUserEchoMatchesAttachmentWrapper(attachments, trimmedCaption, eventText);
 }
 
 function canUseTextFallbackStatus(status: OptimisticSendState['status']) {
@@ -1092,6 +1241,14 @@ function findUnambiguousOptimisticEchoMatch(
     return null;
   }
 
+  const compositeOptimisticIds = findMatchingCompositeQueuedOptimisticIds(
+    event,
+    availableOptimisticSends(optimisticSends, matchedOptimisticIds).map(([, send]) => send),
+  );
+  if (compositeOptimisticIds.length > 0) {
+    return compositeOptimisticIds.find((optimisticId) => !matchedOptimisticIds?.has(optimisticId)) ?? null;
+  }
+
   const sameTextCandidates = availableOptimisticSends(optimisticSends, matchedOptimisticIds)
     .filter(([, send]) => (
       send.turn_queued !== true &&
@@ -1102,9 +1259,17 @@ function findUnambiguousOptimisticEchoMatch(
       (send.text === event.text ||
         serverUserEchoMatchesAttachmentWrapper(send.attachments, send.text, event.text))
     ));
-  const windowMatches = sameTextCandidates.filter(([, send]) => (
-    optimisticMatchesServerUser(send, event, windowMs)
-  ));
+  const windowMatches = sameTextCandidates.filter(([, send]) => {
+    // A keyed attachment wrapper has already proved caption equivalence. Use
+    // comparison-only text so the normal stream/identity/time guards also work
+    // while the send bridge is pending (status queued). Do not parse a literal
+    // caption as an authenticated provider wrapper or change the stored event.
+    const comparisonEvent = send.text !== event.text &&
+      serverUserEchoMatchesAttachmentWrapper(send.attachments, send.text, event.text)
+      ? { ...event, text: send.text, raw: undefined, provider_wrapper: undefined }
+      : event;
+    return optimisticMatchesServerUser(send, comparisonEvent, windowMs);
+  });
   if (windowMatches.length === 1) return windowMatches[0][0];
   if (windowMatches.length > 1) return null;
 
@@ -1124,6 +1289,26 @@ function findUnambiguousOptimisticEchoMatch(
     return collapsibleTwins[0][0];
   }
   return null;
+}
+
+function reconcileCompositeOptimisticEcho(
+  state: PentacleStreamState,
+  event: PentacleEvent,
+  optimisticIds: string[],
+): PentacleStreamState {
+  let next = state;
+  for (const optimisticId of optimisticIds) {
+    const send = next.optimisticSends?.[optimisticId];
+    if (!send) continue;
+    emitOptimisticOrphanResolvedIfNeeded(next, optimisticId, event, 'live');
+    next = reconcileOptimisticSendWithServerEvent(next, optimisticId, {
+      ...event,
+      // A composite daemon echo acknowledges every queued row, but each
+      // client row must retain its own paragraph text.
+      text: send.text,
+    });
+  }
+  return next;
 }
 
 function snapshotEventMatchesPriorCorrelatedOptimistic(prior: PentacleEvent, event: PentacleEvent) {
@@ -1280,6 +1465,19 @@ function reconciledOptimisticEvent(
 ): PentacleEvent {
   const daemonSeq = Number(serverEvent.daemon_seq);
   const directMatch = serverEvent.optimistic_id === optimisticId;
+  if (!directMatch && Number.isFinite(daemonSeq) &&
+    priorEvent?.correlatedDaemonSeq !== daemonSeq &&
+    isCanonicalOnlyAttachmentEcho(optimisticAttachments, optimisticText, serverEvent.text)) {
+    const telemetryKey = `${optimisticId}:${daemonSeq}`;
+    if (!canonicalAttachmentEchoTelemetry.has(telemetryKey)) {
+      canonicalAttachmentEchoTelemetry.add(telemetryKey);
+      // Telemetry replay suppression is bounded and never affects matching.
+      if (canonicalAttachmentEchoTelemetry.size > 256) {
+        canonicalAttachmentEchoTelemetry.delete(canonicalAttachmentEchoTelemetry.values().next().value!);
+      }
+      logTelemetry(TELEMETRY_EVENTS.CHAT_COMPOSE_ATTACHMENT_ECHO_CANONICAL_RECONCILED, { comparison: 'NFC' });
+    }
+  }
   const priorRaw = priorEvent?.raw;
   const priorDirect = priorEvent?.receiptDirectMatch === true;
   const priorHasState = 'receipt_state' in (priorRaw ?? {});
@@ -1310,6 +1508,36 @@ function reconciledOptimisticEvent(
     : serverEvent.raw;
   return freezeEventInDev({
     ...serverEvent,
+    ...(serverEvent.event_id == null && priorEvent?.event_id != null
+      ? { event_id: priorEvent.event_id }
+      : {}),
+    ...(serverEvent.message_id == null && priorEvent?.message_id != null
+      ? { message_id: priorEvent.message_id }
+      : {}),
+    ...(serverEvent.reply_to_message_id == null && priorEvent?.reply_to_message_id != null
+      ? { reply_to_message_id: priorEvent.reply_to_message_id }
+      : {}),
+    ...(serverEvent.reply_to_question_id == null && priorEvent?.reply_to_question_id != null
+      ? { reply_to_question_id: priorEvent.reply_to_question_id }
+      : {}),
+    ...(serverEvent.lane_id == null && priorEvent?.lane_id != null
+      ? { lane_id: priorEvent.lane_id }
+      : {}),
+    ...(serverEvent.publish_kind == null && priorEvent?.publish_kind != null
+      ? { publish_kind: priorEvent.publish_kind }
+      : {}),
+    ...(serverEvent.routing_state == null && priorEvent?.routing_state != null
+      ? { routing_state: priorEvent.routing_state }
+      : {}),
+    ...(serverEvent.accepted_sequence == null && priorEvent?.accepted_sequence != null
+      ? { accepted_sequence: priorEvent.accepted_sequence }
+      : {}),
+    ...(serverEvent.queue_sequence == null && priorEvent?.queue_sequence != null
+      ? { queue_sequence: priorEvent.queue_sequence }
+      : {}),
+    ...(serverEvent.action_committed == null && priorEvent?.action_committed != null
+      ? { action_committed: priorEvent.action_committed }
+      : {}),
     raw,
     // For an attachment send the server echo text is the agent-facing wrapper
     // ("Look at the image file at …, then respond…"); keep the operator's
@@ -1341,6 +1569,7 @@ export function applySnapshotWithOptimisticReconciliation(
     updates?: PentacleUpdateMessage[];
     notifications?: PentacleNotification[];
     working_states?: Record<string, WorkingStateData>;
+    work_lanes?: unknown;
   },
   now = Date.now(),
   limit = PENTACLE_RECENT_EVENT_LIMIT,
@@ -1353,7 +1582,44 @@ export function applySnapshotWithOptimisticReconciliation(
   const visualSends: OptimisticSendState[] = [];
 
   const matchedOptimisticIds = new Set<string>();
+  // carryPriorCorrelatedOptimisticEvents intentionally reuses an untouched
+  // snapshot array.  Own a mutable copy before expanding a composite echo;
+  // normal event projections are frozen in development and production.
+  snapshotEvents = snapshotEvents.slice();
+  for (let eventIndex = 0; eventIndex < snapshotEvents.length; eventIndex += 1) {
+    const echo = snapshotEvents[eventIndex];
+    const compositeOptimisticIds = findMatchingCompositeQueuedOptimisticIds(
+      echo,
+      Object.values(snapshotState.optimisticSends ?? {}),
+    );
+    if (compositeOptimisticIds.length === 0) continue;
+    const reconciledEvents: PentacleEvent[] = [];
+    for (const optimisticId of compositeOptimisticIds) {
+      const send = snapshotState.optimisticSends?.[optimisticId];
+      if (!send || matchedOptimisticIds.has(optimisticId)) continue;
+      emitOptimisticOrphanResolvedIfNeeded(snapshotState, optimisticId, echo, 'snapshot', now);
+      reconciledEvents.push(reconciledOptimisticEvent(
+        optimisticId,
+        {
+          ...echo,
+          // One composite server row acknowledges several sends; preserve
+          // each queued paragraph in the corresponding client row.
+          text: send.text,
+        },
+        send.attachments,
+        send.queued_at,
+        undefined,
+        send.text,
+      ));
+      matchedOptimisticIds.add(optimisticId);
+    }
+    if (reconciledEvents.length > 0) {
+      snapshotEvents.splice(eventIndex, 1, ...reconciledEvents);
+      eventIndex += reconciledEvents.length - 1;
+    }
+  }
   for (const [optimisticId, send] of Object.entries(snapshotState.optimisticSends ?? {})) {
+    if (matchedOptimisticIds.has(optimisticId)) continue;
     const echoIndex = snapshotEvents.findIndex((event) => (
       findUnambiguousOptimisticEchoMatch(
         snapshotState.optimisticSends,
@@ -1444,12 +1710,81 @@ function normalizeEvent(event: PentacleEvent): PentacleEvent {
   return { ...event, host };
 }
 
-function isClaudeJsonlEvent(event: PentacleEvent) {
-  return event.raw?.source === 'claude-jsonl';
+function hasReservedDaemonNotice(event: PentacleEvent) {
+  const raw = event.raw;
+  return Boolean(
+    raw && typeof raw === 'object' && !Array.isArray(raw) &&
+    Object.prototype.hasOwnProperty.call(raw, 'daemon_notice'),
+  );
 }
 
-function isHelperSuggestionEvent(event: PentacleEvent) {
-  return String(event.kind || '').toUpperCase() === 'USER' && isCodexHelperSuggestion(event.text);
+function sameTrustedDaemonNotice(left: PentacleEvent, right: PentacleEvent) {
+  const leftProjection = trustedDaemonNoticeProjection(left);
+  const rightProjection = trustedDaemonNoticeProjection(right);
+  if (!leftProjection || !rightProjection) return false;
+  return (
+    leftProjection.schema_version === rightProjection.schema_version &&
+    leftProjection.kind === rightProjection.kind &&
+    leftProjection.notice_id === rightProjection.notice_id &&
+    leftProjection.stream_id === rightProjection.stream_id &&
+    leftProjection.session_generation === rightProjection.session_generation &&
+    leftProjection.event_id === rightProjection.event_id &&
+    leftProjection.body_sha256 === rightProjection.body_sha256
+  );
+}
+
+function reconcileTrustedDaemonNoticeReplay(
+  prior: PentacleEvent,
+  incoming: PentacleEvent,
+): PentacleEvent {
+  const priorSeq = Number(prior.daemon_seq);
+  const incomingSeq = Number(incoming.daemon_seq);
+  if (
+    !trustedDaemonNoticeProjection(prior) ||
+    prior.stream_id !== incoming.stream_id ||
+    !Number.isFinite(priorSeq) ||
+    priorSeq !== incomingSeq ||
+    prior.text !== incoming.text
+  ) return incoming;
+  if (sameTrustedDaemonNotice(prior, incoming)) return incoming;
+  if (hasReservedDaemonNotice(incoming) || hasExplicitUserSendBinding(incoming)) {
+    // A later conflicting assertion or explicit USER binding revokes display
+    // trust and therefore fails open.
+    return incoming;
+  }
+  const priorNotice = prior.raw?.daemon_notice;
+  return {
+    ...incoming,
+    raw: {
+      ...(incoming.raw || {}),
+      daemon_notice: priorNotice,
+    },
+  };
+}
+
+function reconcileTrustedDaemonNoticeBatch(
+  priorEvents: readonly PentacleEvent[],
+  incoming: readonly PentacleEvent[],
+): PentacleEvent[] {
+  const priorByIdentity = new Map<string, PentacleEvent>();
+  for (const event of priorEvents) {
+    if (!trustedDaemonNoticeProjection(event)) continue;
+    priorByIdentity.set(
+      String(event.stream_id || '') + '\u0000' + String(event.daemon_seq),
+      event,
+    );
+  }
+  if (priorByIdentity.size === 0) return incoming.slice();
+  return incoming.map((event) => {
+    const prior = priorByIdentity.get(
+      String(event.stream_id || '') + '\u0000' + String(event.daemon_seq),
+    );
+    return prior ? reconcileTrustedDaemonNoticeReplay(prior, event) : event;
+  });
+}
+
+function isClaudeJsonlEvent(event: PentacleEvent) {
+  return event.raw?.source === 'claude-jsonl';
 }
 
 function normalizeSession(summary: PentacleSessionSummary): PentacleSessionSummary {
@@ -1511,9 +1846,13 @@ function normalizeHostStats(key: string, raw: unknown): PentacleMachineStats | n
     !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(sampledAt) ||
     !Number.isFinite(Date.parse(sampledAt))
   ) return null;
+  const cpuRaw = record.cpu_usage_pct;
+  const cpuUsage = typeof cpuRaw === 'number' && Number.isFinite(cpuRaw)
+    && cpuRaw >= 0 && cpuRaw <= 100 ? cpuRaw : null;
   return {
     host,
     cpu_load_1m: numbers.cpu_load_1m,
+    ...('cpu_usage_pct' in record ? { cpu_usage_pct: cpuUsage } : {}),
     memory_used_bytes: numbers.memory_used_bytes,
     memory_total_bytes: numbers.memory_total_bytes,
     disk_used_bytes: numbers.disk_used_bytes,
@@ -1557,8 +1896,7 @@ function stripTransientSummary(
   summary: PentacleSessionSummary,
   existing?: PentacleSessionSummary,
 ): PentacleSessionSummary {
-  const isHelperSummary = String(summary.last_kind || '').toUpperCase() === 'USER' && isCodexHelperSuggestion(summary.last_text);
-  const cleanSummary = (!summary.last_text || (!isHelperSummary && !isTransientTranscriptNoise(summary.last_text)))
+  const cleanSummary = (!summary.last_text || !isTransientTranscriptNoise(summary.last_text))
     ? summary
     : {
         ...summary,
@@ -1723,8 +2061,16 @@ export function applyPentacleWorkingState(
   ) {
     return state;
   }
+  const assistantActivity = workingState.assistant_activity;
   return {
     ...state,
+    sessions: assistantActivity ? state.sessions.map(session =>
+      session.stream_id === workingState.stream_id && session.session_kind === 'assistant_composite'
+        ? { ...session, assistant_activity: assistantActivity,
+            working: assistantActivity.pending_count > 0,
+            working_label: assistantActivity.pending_count > 0 ? 'Waiting for reply'
+              : assistantActivity.waiting_for_operator_count > 0 ? 'Waiting for you' : undefined }
+        : session) : state.sessions,
     workingStates: {
       ...state.workingStates,
       [workingState.stream_id]: workingState,
@@ -1759,6 +2105,7 @@ function sameWorkingTaskSummary(a: WorkingTaskSummary, b: WorkingTaskSummary) {
 function sameWorkingStateData(a: WorkingStateData, b: WorkingStateData) {
   return (
     a.stream_id === b.stream_id &&
+    JSON.stringify(a.assistant_activity) === JSON.stringify(b.assistant_activity) &&
     a.timestamp === b.timestamp &&
     a.tokens_input === b.tokens_input &&
     a.tokens_output === b.tokens_output &&
@@ -1846,9 +2193,13 @@ export function applyPentacleEvent(
 
   if (
     !isClaudeJsonlEvent(event) &&
+    (event.attachments?.length ?? 0) === 0 &&
     (event.kind === 'ASSIST' || event.kind === 'TOOL' || event.kind === 'TOOL-OUT') &&
-    isTransientTranscriptNoise(event.text)
+    isTransientTranscriptNoise(event.text) &&
+    !assistantDashboardLink(event)
   ) {
+    // Attachments and typed Design links are durable even without a caption.
+    // The fetched and snapshot filters use the same exemption.
     return state;
   }
 
@@ -1884,6 +2235,14 @@ export function applyPentacleEvent(
     return markPriorCorrelatedOptimisticReturnedToPrompt(state, returnedPromptPrior, Date.now());
   }
 
+  const compositeOptimisticIds = findMatchingCompositeQueuedOptimisticIds(
+    event,
+    Object.values(state.optimisticSends ?? {}),
+  );
+  if (compositeOptimisticIds.length > 0) {
+    return reconcileCompositeOptimisticEcho(state, event, compositeOptimisticIds);
+  }
+
   const optimisticEchoMatch = findUnambiguousOptimisticEchoMatch(
     state.optimisticSends,
     event,
@@ -1910,16 +2269,12 @@ export function applyPentacleEvent(
       const prior = state.events[priorIndex];
       const sameOptimisticClientReplacement = event.client_origin === true &&
         Boolean(event.optimistic_id) && event.optimistic_id === prior.optimistic_id;
+      const proofAwareEvent = reconcileTrustedDaemonNoticeReplay(prior, event);
       const merged = sameOptimisticClientReplacement
         ? event
         : prior.client_origin === true && prior.optimistic_id && event.client_origin !== true
-          // Pass the prior row's text as the optimistic caption so a duplicate
-          // live replay of an attachment-wrapper echo (which re-enters this
-          // seq-correlated path after the send is pruned) keeps rendering the
-          // operator caption, not the daemon wrapper text — matching the live
-          // and snapshot reconcile paths and preventing a wrapper double-render.
           ? reconciledOptimisticEvent(prior.optimistic_id, event, prior.attachments, prior.queued_at, prior, prior.text)
-          : mergeProgressiveUpdate(prior, event);
+          : mergeProgressiveUpdate(prior, proofAwareEvent);
       if (!merged || merged === prior) return state;
       const frozenMerged = freezeEventInDev(merged);
       const nextEvents = state.events.slice();
@@ -1969,7 +2324,7 @@ export function applyPentacleEvent(
   // snapshot rebuild for the rare droppable/malformed event so the whole-list
   // cleanup semantics stay byte-identical. This is the fix for the
   // O(total-per-delivery) build-1155 regression (spec
-  // incremental projection contract).
+  // tap_shell_layout_regression_build_1155).
   const keptByDedupe = event.client_origin === true
     ? Boolean(event.optimistic_id)
     : Number.isFinite(Number(event.daemon_seq));
@@ -1977,7 +2332,11 @@ export function applyPentacleEvent(
     ? appendLiveEventProjection({ ...state, drafts: nextDrafts }, frozenEvent, { perStreamMaxEvents: limit })
     : replacePentacleEventProjection(
       { ...state, drafts: nextDrafts },
-      dedupeRecentEventsByStream([...state.events, frozenEvent], limit),
+      dedupeRecentEventsByStream(
+        [...state.events, frozenEvent],
+        limit,
+        uncappedStreamIds(state),
+      ),
     );
 
   return withTurnTransition(
@@ -2205,7 +2564,10 @@ function applyLiveFetchedStreamEvents(
     if (!streamId || !key || seenKeys.has(key)) {
       return applyFetchedStreamEvents(state, incoming, { limit });
     }
-    if ((countsByStream.get(streamId) || 0) >= limit) {
+    if (
+      !uncappedStreamIds(state).has(streamId) &&
+      (countsByStream.get(streamId) || 0) >= limit
+    ) {
       return applyFetchedStreamEvents(state, incoming, { limit });
     }
     seenKeys.add(key);
@@ -2231,7 +2593,7 @@ function applyLiveFetchedStreamEvents(
   // bucket appends + the already-built flat list, instead of a snapshot-replace
   // that re-groups every stream and re-runs compatibilityProjection each batch —
   // the O(total) allocation that starved the 19.2k freeze burst (spec
-  // incremental projection contract S3).
+  // tap_shell_layout_regression_build_1155 S3).
   const appendedTail = nextEvents.slice(state.events.length);
   const appendedByStream = new Map<string, PentacleEvent[]>();
   for (const event of appendedTail) {
@@ -2336,14 +2698,20 @@ function filterCurrentTailRegression(
   };
 }
 
+// An attachment or a typed Design card can carry the whole message without a caption.
 function normalizeFetchedIncomingEvents(rawEvents: PentacleEvent[] | undefined): PentacleEvent[] {
   if (!Array.isArray(rawEvents)) return [];
-  return rawEvents.map(normalizeEvent).filter((event) => (
+  return rawEvents.map(normalizeEvent).filter(keepFetchedTranscriptEvent);
+}
+
+function keepFetchedTranscriptEvent(event: PentacleEvent) {
+  return (
     event.kind !== 'DRAFT' &&
     event.kind !== 'WORKING' &&
     !isHelperSuggestionEvent(event) &&
-    (isClaudeJsonlEvent(event) || !isTransientTranscriptNoise(event.text))
-  ));
+    (isClaudeJsonlEvent(event) || (event.attachments?.length ?? 0) > 0 ||
+      !isTransientTranscriptNoise(event.text) || Boolean(assistantDashboardLink(event)))
+  );
 }
 
 export function selectCurrentTailEvents(
@@ -2419,9 +2787,13 @@ export function applyFetchedStreamEvents(
   if (typeof optionsOrLimit !== 'number' && optionsOrLimit.mode === 'live') {
     return applyLiveFetchedStreamEvents(state, incoming, touchedStreamIds, limit);
   }
-  const acceptedIncoming = typeof optionsOrLimit !== 'number' && optionsOrLimit.mode === 'current-tail'
+  const acceptedIncomingRaw = typeof optionsOrLimit !== 'number' && optionsOrLimit.mode === 'current-tail'
     ? filterCurrentTailRegression(state, incoming, requestedStreamIds, optionsOrLimit.ingressSource || 'current-tail').events
     : incoming;
+  const acceptedIncoming = reconcileTrustedDaemonNoticeBatch(
+    state.events,
+    acceptedIncomingRaw,
+  );
   if (acceptedIncoming.length === 0) return state;
   const acceptedTouchedStreamIds = new Set([
     ...requestedStreamIds,
@@ -2435,6 +2807,7 @@ export function applyFetchedStreamEvents(
   const events = dedupeRecentEventsByStream(
     [...state.events, ...acceptedIncoming.map(freezeEventInDev)],
     limit,
+    uncappedStreamIds(state),
   );
 
   let eventContentVersionByStream = state.eventContentVersionByStream ?? {};
@@ -2450,7 +2823,7 @@ export function applyFetchedStreamEvents(
   }
   // Derive the turn phase from the fetched history itself (in-band, event-only)
   // so a turn that started before the detail was opened renders as Working on
-  // open (public protocol contract). This NEVER reads
+  // open (chat_detail_working_indicator_missing_2026_06_16). This NEVER reads
   // the lagging session.working summary: doing so could race-close a live turn
   // that a content event already advanced to 'working' before the daemon's
   // working:true summary landed (the chat_detail_stale_working_flag 007d127
@@ -2515,13 +2888,28 @@ export function applyPentacleSnapshotMessage(
     updates?: PentacleUpdateMessage[];
     notifications?: PentacleNotification[];
     working_states?: Record<string, WorkingStateData>;
+    work_lanes?: unknown;
   },
   limit = PENTACLE_RECENT_EVENT_LIMIT,
   now: number = Date.now(),
 ): PentacleStreamState {
   const existingSessions = new Map(state.sessions.map((item) => [item.stream_id, item]));
+  // A snapshot with the actual pane USER row can attest a legacy starter
+  // suggestion. Text alone cannot: a real operator may send identical prose.
+  const helperRows = new Set<string>();
+  const userRows = new Set<string>();
+  const summaryKey = (streamId: string, text: string) => JSON.stringify([streamId, text]);
+  for (const event of Array.isArray(message.events) ? message.events : []) {
+    if (String(event.kind || '').toUpperCase() !== 'USER') continue;
+    (isHelperSuggestionEvent(event) ? helperRows : userRows).add(summaryKey(event.stream_id, event.text));
+  }
   const sessions = Array.isArray(message.sessions)
-    ? sortSessions(message.sessions.map((item) => stripTransientSummary(normalizeSession(item), existingSessions.get(item.stream_id))))
+    ? sortSessions(message.sessions.map((item) => {
+      const key = summaryKey(item.stream_id, item.last_text);
+      const summary = item.last_kind === 'USER' && helperRows.has(key) && !userRows.has(key)
+        ? { ...item, last_text: '', last_kind: '' } : item;
+      return resyncSessionSummary(summary, existingSessions.get(item.stream_id), state.workingByStream?.[item.stream_id]);
+    }))
     : [];
   const hosts = mergeHostsWithSessions(message.hosts || {}, sessions);
   const survivingStreamIds = new Set(sessions.map((item) => item.stream_id));
@@ -2539,12 +2927,14 @@ export function applyPentacleSnapshotMessage(
     : null;
   const hasIncomingEvents = incomingEvents !== null;
   const events = incomingEvents
-    ? dedupeRecentEventsByStream(incomingEvents.map(normalizeEvent).filter((event) => (
-      event.kind !== 'DRAFT' &&
-      event.kind !== 'WORKING' &&
-      !isHelperSuggestionEvent(event) &&
-      (isClaudeJsonlEvent(event) || !isTransientTranscriptNoise(event.text))
-    )), limit).map(freezeEventInDev)
+    ? dedupeRecentEventsByStream(
+      reconcileTrustedDaemonNoticeBatch(
+        state.events,
+        normalizeFetchedIncomingEvents(incomingEvents),
+      ),
+      limit,
+      uncappedStreamIds(state, sessions),
+    ).map(freezeEventInDev)
     : state.events.filter((event) => survivingStreamIds.has(event.stream_id));
   const drafts: Record<string, PentacleEvent> = {};
   for (const [streamId, draft] of Object.entries(message.drafts || {})) {
@@ -2556,6 +2946,7 @@ export function applyPentacleSnapshotMessage(
     sessions,
     survivingStreamIds,
     now,
+    existingSessions,
   );
   // A full-events snapshot (a working session's hello carrying its in-band USER
   // working root, or a full-events desktop client) can SEED a working turn that
@@ -2616,9 +3007,14 @@ export function applyPentacleSnapshotMessage(
     optimisticSends,
     optimisticByRequestId: rebuildOptimisticByRequestId(optimisticSends),
   }, events, hasIncomingEvents ? undefined : [...survivingStreamIds]);
-  return Array.isArray(message.notifications)
-    ? applyNotificationList(nextState, message.notifications)
+  // Lane projection rides the hello snapshot; a snapshot without it (older
+  // daemon, or a client the daemon did not scope in) keeps the prior inventory.
+  const withLanes = message.work_lanes !== undefined
+    ? applyWorkLanesInventory(nextState, message.work_lanes)
     : nextState;
+  return Array.isArray(message.notifications)
+    ? applyNotificationList(withLanes, message.notifications)
+    : withLanes;
 }
 
 // Cheap per-stream content fingerprint for snapshot/inventory comparison.
@@ -2881,9 +3277,8 @@ export function applyPentacleSessionInventory(
   now: number = Date.now(),
 ): PentacleStreamState {
   const existingSessions = new Map(state.sessions.map((item) => [item.stream_id, item]));
-  const sorted = sortSessions(sessions.map((item) => stripTransientSummary(
-    normalizeSession(item),
-    existingSessions.get(item.stream_id),
+  const sorted = sortSessions(sessions.map((item) => resyncSessionSummary(
+    item, existingSessions.get(item.stream_id), state.workingByStream?.[item.stream_id],
   )));
   const survivingStreamIds = new Set(sorted.map((item) => item.stream_id));
   const workingByStream = reconcileWorkingByStreamForResync(
@@ -2891,6 +3286,7 @@ export function applyPentacleSessionInventory(
     sorted,
     survivingStreamIds,
     now,
+    existingSessions,
   );
   const eventContentVersionByStream: Record<string, number> = {};
   for (const [streamId, version] of Object.entries(state.eventContentVersionByStream ?? {})) {

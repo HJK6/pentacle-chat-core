@@ -1,18 +1,25 @@
 import type {
+  AssistantInputActivity,
   ChatAttachment,
   PentacleEvent,
   PentacleHostStatus,
   PentacleMachineStats,
   PentacleSendState,
+  PentacleAssistantPublishKind,
+  PentacleSessionCapabilities,
   PentacleSessionSummary,
   PentacleStreamState,
   OptimisticSendStatus,
+  WorkLaneUpdate,
 } from '../types/pentacle';
 import { getHostOrder, getHostTheme } from './hostConfig';
 import { logTelemetry } from '../utils/telemetry';
 import { TELEMETRY_EVENTS } from '../utils/telemetryEvents';
 import { normalizePentacleHost } from './pentacleHosts';
+import { parseLaneUpdateEvent } from './workLanes';
+import type { DashboardLink } from './dashboardLinks';
 import {
+  assistantDashboardLink,
   coalesceInterpretedEvents,
   collapseCodeBlocks,
   findCoalescibleTerminalDividerIndex,
@@ -20,6 +27,7 @@ import {
   isTransientTranscriptNoise,
   normalizeWorkingLabel,
   normalizedEventText,
+  stripClaudeExpandHint,
   type PentacleDisplayRule,
   type PentacleDisclosurePresentation,
   type PentacleInterpretedEvent,
@@ -34,7 +42,7 @@ import {
 
 export type PentacleSessionStatus = 'unresponsive' | 'working' | 'sending' | 'live' | 'idle' | 'offline';
 export type PentacleTranscriptTone = 'user' | 'agent' | 'assistant' | 'tool' | 'thinking' | 'system';
-export type PentacleReceiptCaption = 'sending' | 'sent' | 'failed';
+export type PentacleReceiptCaption = 'sending' | 'queued' | 'sent' | 'failed';
 
 export type PentacleMachineCard = {
   host: string;
@@ -65,6 +73,11 @@ export type PentacleChatListItem = {
   hostTitle: string;
   provider: string;
   sessionName: string;
+  sessionKind?: string | null;
+  sessionGeneration?: string | null;
+  role?: string | null;
+  visibility?: string | null;
+  capabilities?: PentacleSessionCapabilities | null;
   title: string;
   previewText: string;
   status: PentacleSessionStatus;
@@ -86,9 +99,16 @@ export type PentacleUnifiedFeedItem = {
   hostTitle: string;
   provider: string;
   sessionName: string;
+  sessionKind?: string | null;
+  sessionGeneration?: string | null;
+  role?: string | null;
+  visibility?: string | null;
+  capabilities?: PentacleSessionCapabilities | null;
   chatTitle: string;
   accent: string;
   timestampLabel: string;
+  /** Original event time for interleaving authoritative answer projections. */
+  timestamp?: string;
   text: string;
   kind: string;
   event: PentacleEvent;
@@ -108,6 +128,8 @@ export type PentacleOpenQuestionItem = {
 
 export type PentacleTranscriptItem = {
   id: string;
+  /** Original event time, retained through rendering and answer/voice merging. */
+  timestamp?: string;
   timestampLabel: string;
   label: string;
   tone: PentacleTranscriptTone;
@@ -121,23 +143,47 @@ export type PentacleTranscriptItem = {
   disclosure?: PentacleDisclosurePresentation;
   pending?: boolean;
   receiptCaption?: PentacleReceiptCaption;
+  /** Delivery proof is missing on a receipt which confirms queue acceptance. */
+  receiptAcceptedWithoutProof?: true;
+  /** Explicit not-landed proof, available for native display policy. */
+  receiptNotLanded?: true;
   // B1 (chat_send_turn_lifecycle_batch2): the optimistic send's user-visible
   // lifecycle for a client-origin row — 'sending' while unconfirmed, 'failed'/
   // 'cancelled' on terminal non-delivery, undefined once confirmed (normal
   // bubble). Absent for server-origin rows.
   sendState?: PentacleSendState;
   queuedWhileWorking?: boolean;
+  // True while the daemon confirmed landing but the provider holds the prompt in
+  // its native queue and no correlated USER echo exists yet. Independent of
+  // sendState (which stays tied to the client-side hold).
+  providerQueued?: boolean;
   eventKey?: string;
   optimisticId?: string;
   correlatedDaemonSeq?: number | null;
+  messageId?: string;
+  assistantActivity?: AssistantInputActivity;
+  replyToMessageId?: string;
+  replyToQuestionId?: string;
+  laneId?: string;
+  publishKind?: PentacleAssistantPublishKind;
+  // Typed lane-update card payload when publish_kind === 'lane_update'; `text` stays the summary.
+  laneUpdate?: WorkLaneUpdate;
+  dashboardLink?: DashboardLink;
   // Present on `agent-question-answer` rows: the durable notification this row echoes, so a
   // client holding the same answer as a resolved-notification projection can render one of them
   // rather than both.
   notificationId?: string;
+  /** Exact validated notification answer, including literal LF and whitespace. */
+  notificationAnswerText?: string;
   // Image attachments for a client-origin USER bubble (spec ## Attachment
   // model). Copied from the underlying PentacleEvent so every view (desktop +
   // mobile) renders the media bubble from the same transcript shape. FIFO order.
   attachments?: ChatAttachment[];
+  // P6 verdict/count from the daemon's USER echo, never an answer acknowledgement.
+  voice?: { duration_s: number };
+  voiceAnswersStatus?: { state: 'bound' | 'dropped'; reason?: string; staleKeys: string[] };
+  voiceAnswersItemCount?: number;
+  voiceAnswersInvalid?: boolean;
 };
 
 /** A summary-only row that is safe to paint before transcript derivation. */
@@ -154,6 +200,11 @@ export type PentacleSessionDetail = {
   title: string;
   hostTitle: string;
   providerLabel: string;
+  sessionKind?: string | null;
+  sessionGeneration?: string | null;
+  role?: string | null;
+  visibility?: string | null;
+  capabilities?: PentacleSessionCapabilities | null;
   status: PentacleSessionStatus;
   statusLabel: string;
   summaryLabel: string;
@@ -241,6 +292,28 @@ function displayTitleForSession(session: PentacleSessionSummary) {
   return title || session.session_name;
 }
 
+/**
+ * The daemon's explicit session kind is the only composite identity signal.
+ * Provider, role, title and stream-name conventions are intentionally ignored.
+ */
+export function isPentacleAssistantCompositeSession(
+  session: Pick<PentacleSessionSummary, 'session_kind'> | null | undefined,
+) {
+  return session?.session_kind === 'assistant_composite';
+}
+
+function sameSessionCapabilities(
+  left: PentacleSessionCapabilities | null | undefined,
+  right: PentacleSessionCapabilities | null | undefined,
+) {
+  if (left === right) return true;
+  if (!left || !right) return left === right;
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every((key) => left[key] === right[key]);
+}
+
 function formatClock(timestamp?: string) {
   if (!timestamp) return '';
   const date = new Date(timestamp);
@@ -306,9 +379,27 @@ function isDirectMatchedUserEcho(event: PentacleEvent): boolean {
     hasCorrelatedDaemonSeq(event);
 }
 
-function receiptCaptionForLatestUserEvent(event: PentacleEvent): PentacleReceiptCaption | undefined {
+// A provider-native-queued send (daemon landed it, provider holds it) that has
+// not yet been correlated to its USER echo. Failed/cancelled rows never show it.
+function isProviderQueuedAwaitingEcho(
+  event: PentacleEvent,
+  send: { status?: OptimisticSendStatus; provider_queued?: boolean } | undefined,
+): boolean {
+  return send?.provider_queued === true &&
+    send.status !== 'failed' && send.status !== 'cancelled' &&
+    !hasCorrelatedDaemonSeq(event);
+}
+
+function receiptCaptionForLatestUserEvent(
+  event: PentacleEvent,
+  send?: { status?: OptimisticSendStatus; provider_queued?: boolean },
+): PentacleReceiptCaption | undefined {
   if (!event.client_origin || !event.optimistic_id) return undefined;
-  if (!hasCorrelatedDaemonSeq(event)) return 'sending';
+  if (!hasCorrelatedDaemonSeq(event)) {
+    if (isProviderQueuedAwaitingEcho(event, send)) return 'queued';
+    // The daemon confirmed landing: show Sent now instead of waiting for the echo.
+    return send?.status === 'acked' ? 'sent' : 'sending';
+  }
   if (!isDirectMatchedUserEcho(event)) return undefined;
   if (normalizedReceiptField(event, 'receipt_state') === 'landed') return 'sent';
   if (normalizedReceiptField(event, 'receipt_delivery') === 'proof_unavailable') return 'failed';
@@ -333,7 +424,6 @@ type TranscriptEventSortKey = {
   hasSeq: boolean;
   time: number;
   hasTime: boolean;
-  pairRank: number;
   deterministicTie: string;
 };
 
@@ -349,64 +439,25 @@ function transcriptEventDeterministicTie(event: PentacleEvent): string {
   ].join('\u0000');
 }
 
-function shouldPreferClaudeToolUseCandidate(candidate: PentacleEvent, current: PentacleEvent): boolean {
-  const candidateSeq = authoritativeEventSeq(candidate);
-  const currentSeq = authoritativeEventSeq(current);
-  const candidateHasSeq = Number.isFinite(candidateSeq);
-  const currentHasSeq = Number.isFinite(currentSeq);
-  if (candidateHasSeq && currentHasSeq && candidateSeq !== currentSeq) return candidateSeq < currentSeq;
-  if (candidateHasSeq !== currentHasSeq) return candidateHasSeq;
-
-  const candidateTime = eventTimestampMs(candidate);
-  const currentTime = eventTimestampMs(current);
-  const candidateHasTime = Number.isFinite(candidateTime);
-  const currentHasTime = Number.isFinite(currentTime);
-  if (candidateHasTime && currentHasTime && candidateTime !== currentTime) return candidateTime < currentTime;
-  if (candidateHasTime !== currentHasTime) return candidateHasTime;
-
-  return transcriptEventDeterministicTie(candidate).localeCompare(transcriptEventDeterministicTie(current)) < 0;
-}
-
 function buildTranscriptEventSortKeys(events: readonly PentacleEvent[]): Map<PentacleEvent, TranscriptEventSortKey> {
-  const claudeToolUseById = new Map<string, PentacleEvent>();
-  for (const event of events) {
-    if (event.raw?.source !== 'claude-jsonl') continue;
-    if (event.kind !== 'TOOL_USE') continue;
-    const toolUseId = String(event.raw?.tool_use_id || '').trim();
-    if (!toolUseId) continue;
-    const current = claudeToolUseById.get(toolUseId);
-    if (!current || shouldPreferClaudeToolUseCandidate(event, current)) {
-      claudeToolUseById.set(toolUseId, event);
-    }
-  }
-
-  const keys = new Map<PentacleEvent, TranscriptEventSortKey>();
-  for (const event of events) {
-    const toolUseId = String(event.raw?.tool_use_id || '').trim();
-    const matchedToolUse = event.raw?.source === 'claude-jsonl' && event.kind === 'TOOL_RESULT' && toolUseId
-      ? claudeToolUseById.get(toolUseId)
-      : undefined;
-    const primary = matchedToolUse || event;
-    const seq = authoritativeEventSeq(primary);
-    const time = eventTimestampMs(primary);
-    keys.set(event, {
+  return new Map(events.map((event) => {
+    const seq = authoritativeEventSeq(event);
+    const time = eventTimestampMs(event);
+    return [event, {
       seq,
       hasSeq: Number.isFinite(seq),
       time,
       hasTime: Number.isFinite(time),
-      pairRank: matchedToolUse ? 1 : 0,
       deterministicTie: transcriptEventDeterministicTie(event),
-    });
-  }
-  return keys;
+    }];
+  }));
 }
 
 function compareTranscriptEventSortKeys(left: TranscriptEventSortKey, right: TranscriptEventSortKey): number {
-  if (left.hasSeq && right.hasSeq && left.seq !== right.seq) return left.seq - right.seq;
   if (left.hasTime && right.hasTime && left.time !== right.time) return left.time - right.time;
   if (left.hasTime !== right.hasTime) return left.hasTime ? -1 : 1;
+  if (left.hasSeq && right.hasSeq && left.seq !== right.seq) return left.seq - right.seq;
   if (left.hasSeq !== right.hasSeq) return left.hasSeq ? -1 : 1;
-  if (left.pairRank !== right.pairRank) return left.pairRank - right.pairRank;
   return left.deterministicTie.localeCompare(right.deterministicTie);
 }
 
@@ -674,6 +725,11 @@ function sameChatListItem(a: PentacleChatListItem, b: PentacleChatListItem) {
     a.hostTitle === b.hostTitle &&
     a.provider === b.provider &&
     a.sessionName === b.sessionName &&
+    a.sessionKind === b.sessionKind &&
+    a.sessionGeneration === b.sessionGeneration &&
+    a.role === b.role &&
+    a.visibility === b.visibility &&
+    sameSessionCapabilities(a.capabilities, b.capabilities) &&
     a.title === b.title &&
     a.previewText === b.previewText &&
     a.status === b.status &&
@@ -692,7 +748,9 @@ function sameChatListItem(a: PentacleChatListItem, b: PentacleChatListItem) {
 function sameTranscriptItem(a: PentacleTranscriptItem, b: PentacleTranscriptItem) {
   return (
     a.id === b.id &&
+    a.timestamp === b.timestamp &&
     a.timestampLabel === b.timestampLabel &&
+    a.timestamp === b.timestamp &&
     a.label === b.label &&
     a.tone === b.tone &&
     a.provider === b.provider &&
@@ -703,17 +761,37 @@ function sameTranscriptItem(a: PentacleTranscriptItem, b: PentacleTranscriptItem
     a.eventKey === b.eventKey &&
     a.optimisticId === b.optimisticId &&
     a.correlatedDaemonSeq === b.correlatedDaemonSeq &&
+    a.messageId === b.messageId &&
+    JSON.stringify(a.assistantActivity) === JSON.stringify(b.assistantActivity) &&
+    a.replyToMessageId === b.replyToMessageId &&
+    a.replyToQuestionId === b.replyToQuestionId &&
+    a.laneId === b.laneId &&
+    a.publishKind === b.publishKind &&
+    a.laneUpdate?.update_id === b.laneUpdate?.update_id &&
+    a.laneUpdate?.kind === b.laneUpdate?.kind &&
+    a.laneUpdate?.summary === b.laneUpdate?.summary &&
+    JSON.stringify(a.dashboardLink) === JSON.stringify(b.dashboardLink) &&
     a.eventCase === b.eventCase &&
     a.displayRule === b.displayRule &&
+    a.notificationId === b.notificationId &&
     a.disclosure?.previewText === b.disclosure?.previewText &&
     a.disclosure?.previewTail === b.disclosure?.previewTail &&
     a.disclosure?.expandable === b.disclosure?.expandable &&
     a.disclosure?.expandedText === b.disclosure?.expandedText &&
     a.pending === b.pending &&
     a.receiptCaption === b.receiptCaption &&
+    a.receiptAcceptedWithoutProof === b.receiptAcceptedWithoutProof &&
+    a.receiptNotLanded === b.receiptNotLanded &&
     a.sendState === b.sendState &&
     a.queuedWhileWorking === b.queuedWhileWorking &&
-    a.attachments === b.attachments
+    a.providerQueued === b.providerQueued &&
+    a.attachments === b.attachments &&
+    a.voice?.duration_s === b.voice?.duration_s &&
+    a.voiceAnswersItemCount === b.voiceAnswersItemCount &&
+    a.voiceAnswersInvalid === b.voiceAnswersInvalid &&
+    a.voiceAnswersStatus?.state === b.voiceAnswersStatus?.state &&
+    a.voiceAnswersStatus?.reason === b.voiceAnswersStatus?.reason &&
+    JSON.stringify(a.voiceAnswersStatus?.staleKeys) === JSON.stringify(b.voiceAnswersStatus?.staleKeys)
   );
 }
 
@@ -878,6 +956,11 @@ export function createChatListSelector(): PentacleChatListSelector {
           hostTitle: resolveHostTitle(host),
           provider: session.provider.toUpperCase(),
           sessionName: session.session_name,
+          sessionKind: session.session_kind ?? null,
+          sessionGeneration: session.session_generation ?? null,
+          role: session.role ?? null,
+          visibility: session.visibility ?? null,
+          capabilities: session.capabilities ?? null,
           title: displayTitleForSession(session),
           previewText: latestDisplayedSessionPreviewFromEvents(
             state,
@@ -1130,6 +1213,11 @@ function unifiedFeedId(event: PentacleEvent) {
   ].join(':');
 }
 
+function laneUpdateField(event: PentacleEvent): { laneUpdate?: WorkLaneUpdate } {
+  const laneUpdate = parseLaneUpdateEvent(event);
+  return laneUpdate ? { laneUpdate } : {};
+}
+
 function unifiedEventAllowsFeed(event: PentacleEvent, session: PentacleSessionSummary | undefined) {
   if (!session) return null;
   if (event.client_origin) return null;
@@ -1160,6 +1248,11 @@ export function selectUnifiedFeed(state: PentacleStreamState): PentacleUnifiedFe
         hostTitle: resolveHostTitle(host),
         provider: (session.provider || event.provider || '').toUpperCase(),
         sessionName: session.session_name || event.session_name,
+        sessionKind: session.session_kind ?? null,
+        sessionGeneration: session.session_generation ?? null,
+        role: session.role ?? null,
+        visibility: session.visibility ?? null,
+        capabilities: session.capabilities ?? null,
         chatTitle: displayTitleForSession(session),
         accent: hostAccent(host),
         timestampLabel: formatClock(event.timestamp),
@@ -1434,6 +1527,11 @@ function selectSessionDetailFromStreamEvents(
     title,
     hostTitle,
     providerLabel,
+    sessionKind: session.session_kind ?? null,
+    sessionGeneration: session.session_generation ?? null,
+    role: session.role ?? null,
+    visibility: session.visibility ?? null,
+    capabilities: session.capabilities ?? null,
     status,
     statusLabel,
     summaryLabel,
@@ -1452,6 +1550,11 @@ function selectSessionDetailFromStreamEvents(
     previousDetail.title === nextDetail.title &&
     previousDetail.hostTitle === nextDetail.hostTitle &&
     previousDetail.providerLabel === nextDetail.providerLabel &&
+    previousDetail.sessionKind === nextDetail.sessionKind &&
+    previousDetail.sessionGeneration === nextDetail.sessionGeneration &&
+    previousDetail.role === nextDetail.role &&
+    previousDetail.visibility === nextDetail.visibility &&
+    sameSessionCapabilities(previousDetail.capabilities, nextDetail.capabilities) &&
     previousDetail.status === nextDetail.status &&
     previousDetail.statusLabel === nextDetail.statusLabel &&
     previousDetail.summaryLabel === nextDetail.summaryLabel &&
@@ -1544,6 +1647,11 @@ function sessionDetailInputSignature(
       host: session.host,
       provider: session.provider,
       session_name: session.session_name,
+      session_kind: session.session_kind ?? null,
+      session_generation: session.session_generation ?? null,
+      role: session.role ?? null,
+      visibility: session.visibility ?? null,
+      capabilities: session.capabilities ?? null,
       display_name: session.display_name || '',
       title: session.title || '',
       last_event_at: session.last_event_at || '',
@@ -1568,6 +1676,7 @@ function sessionDetailInputSignature(
       }
       : null,
     optimisticSendSignature,
+    assistantActivity: state.workingStates?.[streamId]?.assistant_activity ?? session.assistant_activity,
   });
 }
 
@@ -1658,8 +1767,13 @@ function buildSessionTranscriptRows(
       visibleEvents.push(item);
     }
   }
+  const visibleSortKeys = buildTranscriptEventSortKeys(visibleEvents.map((item) => item.event));
+  visibleEvents.sort((left, right) => compareTranscriptEventSortKeys(
+    visibleSortKeys.get(left.event)!, visibleSortKeys.get(right.event)!,
+  ));
   const transcriptItems: PentacleTranscriptItem[] = [];
   let lastTimestampMinute = '';
+  const seenLaneUpdateKeys = new Set<string>();
 
   for (const item of visibleEvents) {
     const event = item.event;
@@ -1697,9 +1811,19 @@ function buildSessionTranscriptRows(
     }
 
     const authoritativeSeq = authoritativeEventSeq(event);
+    const laneUpdate = parseLaneUpdateEvent(event);
+    const dashboardLink = item.displayRule === 'bubble:assistant' ? assistantDashboardLink(event) : null;
+    if (laneUpdate) {
+      // A re-published update keeps its message id across daemon sequences; the
+      // timeline shows each typed update once.
+      const laneUpdateKey = event.message_id || laneUpdate.update_id;
+      if (seenLaneUpdateKeys.has(laneUpdateKey)) continue;
+      seenLaneUpdateKeys.add(laneUpdateKey);
+    }
     const nextItem: PentacleTranscriptItem = {
       id: event.optimistic_id || (Number.isFinite(authoritativeSeq) ? String(authoritativeSeq) : String(event.daemon_seq)),
       timestampLabel,
+      timestamp: event.timestamp,
       label: item.label,
       tone: item.tone,
       provider: String(event.provider || ''),
@@ -1713,14 +1837,52 @@ function buildSessionTranscriptRows(
       eventKey: renderEventKey(event.stream_id, authoritativeSeq, event.optimistic_id),
       optimisticId: event.optimistic_id,
       correlatedDaemonSeq: event.correlatedDaemonSeq,
+      ...(event.event_id || event.message_id
+        ? { messageId: event.message_id ?? event.event_id ?? undefined }
+        : {}),
+      ...((state.workingStates?.[streamId]?.assistant_activity?.inputs[event.message_id || event.optimistic_id || '']
+          ?? session.assistant_activity?.inputs[event.message_id || event.optimistic_id || '']
+          ?? event.raw?.assistant_activity)
+        ? { assistantActivity: (state.workingStates?.[streamId]?.assistant_activity?.inputs[event.message_id || event.optimistic_id || '']
+          ?? session.assistant_activity?.inputs[event.message_id || event.optimistic_id || '']
+          ?? event.raw?.assistant_activity) as AssistantInputActivity } : {}),
+      ...(event.reply_to_message_id
+        ? { replyToMessageId: event.reply_to_message_id }
+        : {}),
+      ...(event.reply_to_question_id
+        ? { replyToQuestionId: event.reply_to_question_id }
+        : {}),
+      ...(event.lane_id ? { laneId: event.lane_id } : {}),
+      ...(event.publish_kind ? { publishKind: event.publish_kind } : {}),
+      ...(laneUpdate ? { laneUpdate } : {}),
+      ...(dashboardLink ? { dashboardLink } : {}),
       ...(item.notificationId ? { notificationId: item.notificationId } : {}),
+      ...(item.notificationAnswerText !== undefined ? { notificationAnswerText: item.notificationAnswerText } : {}),
     };
     if (event.attachments && event.attachments.length > 0) {
       nextItem.attachments = event.attachments;
     }
-    if (send?.queued_at !== undefined || event.queued_at !== undefined) {
-      nextItem.queuedWhileWorking = true;
+    if (event.meta?.voice && typeof event.meta.voice.duration_s === 'number') {
+      nextItem.voice = { duration_s: event.meta.voice.duration_s };
     }
+    if (nextItem.isUser) {
+      if (send?.failure_reason === 'voice_answers_invalid') nextItem.voiceAnswersInvalid = true;
+      const answersStatus = event.meta?.voice_answers_status;
+      if (answersStatus && (answersStatus.state === 'bound' || answersStatus.state === 'dropped')) {
+        nextItem.voiceAnswersStatus = {
+          state: answersStatus.state,
+          ...(typeof answersStatus.reason === 'string' ? { reason: answersStatus.reason } : {}),
+          staleKeys: Array.isArray(answersStatus.stale_keys) ? answersStatus.stale_keys.filter(key => typeof key === 'string') : [],
+        };
+      }
+      const answerItems = event.meta?.voice_answers?.items;
+      if (Array.isArray(answerItems) && answerItems.length > 0) nextItem.voiceAnswersItemCount = answerItems.length;
+    }
+    // Queue origin/busy hints are not native queue proof. USER reconciliation
+    // retires the optimistic row, so old receipts cannot resurrect its action.
+    const providerQueued = isProviderQueuedAwaitingEcho(event, send)
+      && !['returned_to_prompt', 'echoed', 'reconciled'].includes(send!.status);
+    if (providerQueued || send?.queued_at !== undefined || event.queued_at !== undefined) nextItem.queuedWhileWorking = true;
     if (event.client_origin === true) {
       if (send?.status === 'returned_to_prompt') continue;
       const sendState = deriveSendState(send);
@@ -1730,9 +1892,24 @@ function buildSessionTranscriptRows(
       // the latest matching durable USER echo.
       nextItem.sendState = sendState;
     }
+    if (event.client_origin === true && isProviderQueuedAwaitingEcho(event, send)) {
+      nextItem.providerQueued = true;
+    }
     if (event === latestUserEvent && send?.status !== 'cancelled') {
-      const receiptCaption = receiptCaptionForLatestUserEvent(event);
+      const receiptCaption = receiptCaptionForLatestUserEvent(event, send);
       if (receiptCaption) nextItem.receiptCaption = receiptCaption;
+      if (hasCorrelatedDaemonSeq(event) && isDirectMatchedUserEcho(event)
+        && normalizedReceiptField(event, 'receipt_state') === 'not_landed'
+        && normalizedReceiptField(event, 'receipt_delivery') === 'not_landed') {
+        nextItem.receiptNotLanded = true;
+      }
+      if (receiptCaption === 'failed' && normalizedReceiptField(event, 'receipt_state') === 'accepted') {
+        nextItem.receiptAcceptedWithoutProof = true;
+      }
+      if (!hasCorrelatedDaemonSeq(event) && send?.provider_queued === false
+        && !['failed', 'cancelled', 'returned_to_prompt'].includes(send.status)) {
+        nextItem.receiptCaption = 'sent';
+      }
     }
     transcriptItems.push(reuseTranscriptItem(previousItems, nextItem));
   }
@@ -1750,7 +1927,7 @@ function buildSessionTranscriptRows(
   const remainingInWindow = Math.max(0, dedupedEvents.length - visibleEvents.length);
   const remainingCount = remainingInWindow;
   const fallbackSegments = splitProvenancedNotificationAnswerSummaryText(session);
-  const fallbackText = normalizedEventText(fallbackSegments?.answerText ?? session.last_text ?? '');
+  const fallbackText = fallbackSegments?.answerText ?? session.last_text ?? '';
   const fallbackKind = session.last_kind || 'ASSIST';
   const fallbackEvent = {
     daemon_seq: -1,
@@ -1764,7 +1941,15 @@ function buildSessionTranscriptRows(
     text: fallbackText,
   };
   const fallbackInterpretation = interpretPentacleEvent(fallbackEvent, resolveHostTitle(session.host));
-  const fallbackDisplayText = (fallbackInterpretation.text || fallbackText).trim();
+  // Ordinary prose keeps its original Markdown, including fenced code. Parsed
+  // question/peer/tool presentations still use the interpreter's display text.
+  const fallbackDisplayText = (
+    fallbackInterpretation.caseId === 'assistant-message' ||
+    fallbackInterpretation.caseId === 'user-message' ||
+    fallbackInterpretation.caseId === 'unknown'
+      ? stripClaudeExpandHint(fallbackText)
+      : fallbackInterpretation.text || fallbackText
+  ).trim();
   const fallbackCompareText = normalizedEventText(fallbackDisplayText || fallbackText);
   const fallbackMatchesReturnedToPrompt = String(fallbackKind || '').toUpperCase() === 'USER' &&
     (
@@ -1779,8 +1964,9 @@ function buildSessionTranscriptRows(
         normalizedEventText(event.text) === fallbackCompareText
       ))
     );
-  const fallbackAt = Date.parse(String(session.last_event_at || ''));
-  const fallbackMatchesHeldEvent = Number.isFinite(fallbackAt) && baseEvents.some((event) => {
+  // last_event_at also advances on tools/status. It cannot identify last_text
+  // or justify rendering another copy of a message already held locally.
+  const fallbackMatchesHeldEvent = baseEvents.some((event) => {
     if (event.stream_id !== streamId) return false;
     if (isReturnedToPromptUserEvent(event)) return false;
     if (event.kind !== fallbackKind) return false;
@@ -1791,8 +1977,7 @@ function buildSessionTranscriptRows(
         return false;
       }
     }
-    const eventAt = eventTimestampMs(event);
-    return Number.isFinite(eventAt) && eventAt >= fallbackAt;
+    return true;
   });
   const fallbackAlreadyRendered = dedupedEvents.some((item) => {
     if (isReturnedToPromptUserEvent(item.event)) return false;
@@ -1806,16 +1991,6 @@ function buildSessionTranscriptRows(
     if (item.event.kind !== fallbackKind) return false;
     if (!includeTools && isToolActionRow(item) && !isToolActionRow(fallbackInterpretation)) {
       return false;
-    }
-    if (isToolActionRow(fallbackInterpretation) && renderedText.startsWith(fallbackCompareText)) {
-      return true;
-    }
-    if (item.event.client_origin === true && item.event.optimistic_id) {
-      return true;
-    }
-    const eventAt = eventTimestampMs(item.event);
-    if (Number.isFinite(fallbackAt) && Number.isFinite(eventAt)) {
-      return eventAt >= fallbackAt;
     }
     return true;
   });
@@ -1852,7 +2027,7 @@ function buildSessionTranscriptRows(
     dedupedEvents.some((item) => (
       item.event.client_origin === true &&
       (item.event.attachments?.length ?? 0) > 0 &&
-      serverUserEchoMatchesAttachmentWrapper(item.event.attachments, item.text.trim(), fallbackText)
+      serverUserEchoMatchesAttachmentWrapper(item.event.attachments, item.text.trim(), fallbackSegments?.answerText ?? session.last_text ?? '')
     ));
   const shouldAppendFallback = Boolean(
     fallbackCompareText &&
@@ -1899,16 +2074,18 @@ function buildSessionTranscriptRows(
 
     const fallbackItem = reuseTranscriptItem(previousItems, {
       id: `fallback:${streamId}`,
+      timestamp: session.last_event_at,
       timestampLabel,
       label: fallbackInterpretation.label,
       tone: fallbackInterpretation.tone,
       provider: String(session.provider || ''),
       source: '',
-      text: collapseCodeBlocks(fallbackDisplayText || fallbackText),
+      text: fallbackDisplayText || fallbackText,
       kind: fallbackKind,
       isUser: fallbackInterpretation.tone === 'user',
       eventCase: fallbackInterpretation.caseId,
       displayRule: fallbackInterpretation.displayRule,
+      ...(fallbackInterpretation.notificationId ? { notificationId: fallbackInterpretation.notificationId } : {}),
       ...(fallbackInterpretation.disclosure ? { disclosure: fallbackInterpretation.disclosure } : {}),
       eventKey: 'uncorrelated_fallback',
     });
@@ -2114,4 +2291,25 @@ function suppressToolRowsCoveredByBatch(items: PentacleInterpretedEvent[]) {
     const toolUseId = String(item.event.raw?.tool_use_id || '').trim();
     return !toolUseId || !coveredToolUseIds.has(toolUseId);
   });
+}
+
+
+/** User-facing response status; finishing an answer never asserts project completion. */
+export function formatAssistantActivity(activity: AssistantInputActivity, now = Date.now()): string {
+  const duration = (ms: number) => `${Math.max(0, Math.floor(ms / 1000))}s`;
+  const first = typeof activity.reply_latency_ms === 'number' ? `First reply ${duration(activity.reply_latency_ms)}` : '';
+  const elapsed = Math.max(0, now - Date.parse(activity.accepted_at));
+  switch (activity.response_state) {
+    case 'queued': case 'routing': case 'awaiting_reply':
+      return `Waiting for reply${Number.isFinite(elapsed) ? ` · ${duration(elapsed)}` : ''}`;
+    case 'acknowledged': return `Follow-up pending${first ? ` · ${first}` : ''}`;
+    case 'answered': return `${first}${first ? ' · ' : ''}Answer complete${typeof activity.final_latency_ms === 'number' ? ` ${duration(activity.final_latency_ms)}` : ''}`;
+    case 'reply_received': return `${first || 'Reply received'} · Completion not recorded`;
+    case 'waiting_for_operator': return 'Waiting for you';
+    case 'waiting_for_dependency': return 'Waiting on an earlier reply';
+    case 'uncertain': return 'Delivery unconfirmed';
+    case 'failed': return 'Could not get a reply';
+    case 'cancelled': return 'Cancelled';
+    default: return '';
+  }
 }
