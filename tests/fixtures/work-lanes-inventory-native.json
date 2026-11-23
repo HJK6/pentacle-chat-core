@@ -1,0 +1,2160 @@
+{
+  "schema": "work_lanes_inventory_v2",
+  "description": "Frozen wire contract for first-class work lanes (spec_pentacle__first_class_work_lanes_2026_10 D6/D7). Consumed by the daemon Python projection test and both chat-core TypeScript suites. Clients must not reorder lanes[] and must not compute counts from sessions.",
+  "capability": "work_lanes_v1",
+  "inventory_frame": {
+    "type": "work_lanes.inventory",
+    "lanes": [
+      {
+        "lane_id": "wl-blocked-0001",
+        "title": "Sample daemon deploy",
+        "summary": "Ship the sample candidate to the sample host",
+        "state": "blocked",
+        "state_reason": "fd",
+        "blocker": "Waiting for operator deploy window",
+        "owner_kind": "fd",
+        "version": 4,
+        "updated_at": "2026-10-07T19:00:00.000Z",
+        "first_admitted_at": "2026-10-07T17:00:00.000Z",
+        "done_at": null,
+        "lead": {
+          "stream_id": "fixture-host:v2-lead0001",
+          "generation": "gen-lead-0001",
+          "qualifies": true,
+          "status": "open",
+          "visibility": "default",
+          "presence": {
+            "online": true,
+            "working": false,
+            "capture_liveness": "idle",
+            "last_activity": "2026-10-07T18:55:00Z"
+          },
+          "status_card": {
+            "goal": "Deploy daemon",
+            "active_step": "Await window",
+            "update": null,
+            "eta_at": "2026-10-07T21:00:00Z",
+            "eta_set_at": "2026-10-07T18:00:00Z",
+            "updated_at": "2026-10-07T18:50:00Z"
+          },
+          "eta_stale": false
+        },
+        "visible_chat": {
+          "stream_id": "fixture-host:v2-lead0001",
+          "generation": "gen-lead-0001",
+          "kind": "session",
+          "available": "open"
+        },
+        "last_update": {
+          "update_id": "lane-update:wl-blocked-0001:req-block-1",
+          "kind": "lane_blocked",
+          "event_id": 1043,
+          "ts": "2026-10-07T19:00:00.000Z"
+        }
+      },
+      {
+        "lane_id": "wl-active-0002",
+        "title": "Work lanes mobile slice",
+        "summary": "Header count, lanes list, lane_update card",
+        "state": "active",
+        "state_reason": "fd",
+        "blocker": null,
+        "owner_kind": "fd",
+        "version": 3,
+        "updated_at": "2026-10-07T18:58:00.000Z",
+        "first_admitted_at": "2026-10-07T18:00:00.000Z",
+        "done_at": null,
+        "lead": {
+          "stream_id": "fixture-host:v2-lead0002",
+          "generation": "gen-lead-0002",
+          "qualifies": true,
+          "status": "open",
+          "visibility": "default",
+          "presence": {
+            "online": true,
+            "working": true,
+            "capture_liveness": "idle",
+            "last_activity": "2026-10-07T18:55:00Z"
+          },
+          "status_card": {
+            "goal": "Mobile lanes UI",
+            "active_step": "LanesSurface",
+            "update": null,
+            "eta_at": "2026-10-08T04:00:00Z",
+            "eta_set_at": "2026-10-07T18:30:00Z",
+            "updated_at": "2026-10-07T18:50:00Z"
+          },
+          "eta_stale": false
+        },
+        "visible_chat": {
+          "stream_id": "home:assistant",
+          "generation": null,
+          "kind": "composite",
+          "available": "open"
+        },
+        "last_update": {
+          "update_id": "lane-update:wl-active-0002:adopt:stream:fixture-host:v2-lead0002",
+          "kind": "lane_started",
+          "event_id": 1001,
+          "ts": "2026-10-07T18:00:00.000Z"
+        }
+      },
+      {
+        "lane_id": "wl-paused-0004",
+        "title": "Voice answers web",
+        "summary": "Paused after lead seat closed",
+        "state": "active",
+        "state_reason": "lead_lost",
+        "blocker": null,
+        "owner_kind": "operator",
+        "version": 2,
+        "updated_at": "2026-10-07T18:40:00.000Z",
+        "first_admitted_at": "2026-10-07T16:00:00.000Z",
+        "done_at": null,
+        "lead": {
+          "stream_id": "fixture-host:v2-lead0004",
+          "generation": "gen-lead-0004-old",
+          "qualifies": false,
+          "status": "open",
+          "visibility": "default",
+          "presence": {
+            "online": true,
+            "working": false,
+            "capture_liveness": "idle",
+            "last_activity": "2026-10-07T18:55:00Z"
+          },
+          "status_card": {
+            "goal": "Voice answers",
+            "active_step": null,
+            "update": null,
+            "eta_at": "2026-10-07T20:00:00Z",
+            "eta_set_at": "2026-10-07T16:30:00Z",
+            "updated_at": "2026-10-07T18:50:00Z"
+          },
+          "eta_stale": true
+        },
+        "visible_chat": {
+          "stream_id": "fixture-host:v2-chat0004",
+          "generation": "gen-chat-0004-old",
+          "kind": "session",
+          "available": "unavailable"
+        },
+        "last_update": null
+      },
+      {
+        "lane_id": "wl-paused-0003",
+        "title": "Household boards",
+        "summary": "Deliberately paused by FD",
+        "state": "paused",
+        "state_reason": "fd",
+        "blocker": null,
+        "owner_kind": "operator",
+        "version": 5,
+        "updated_at": "2026-10-07T18:30:00.000Z",
+        "first_admitted_at": "2026-10-07T12:00:00.000Z",
+        "done_at": null,
+        "lead": {
+          "stream_id": "fixture-host:v2-lead0003",
+          "generation": "gen-lead-0003",
+          "qualifies": false,
+          "status": "closed",
+          "visibility": "default",
+          "presence": {
+            "online": false,
+            "working": false,
+            "capture_liveness": "transport_unknown",
+            "last_activity": null
+          },
+          "status_card": {
+            "goal": "Boards",
+            "active_step": null,
+            "update": null,
+            "eta_at": "2026-10-07T15:00:00Z",
+            "eta_set_at": "2026-10-07T12:30:00Z",
+            "updated_at": "2026-10-07T18:50:00Z"
+          },
+          "eta_stale": true
+        },
+        "visible_chat": {
+          "stream_id": "fixture-host:v2-lead0003",
+          "generation": "gen-lead-0003",
+          "kind": "session",
+          "available": "history"
+        },
+        "last_update": {
+          "update_id": "lane-update:wl-paused-0003:req-unblock-3",
+          "kind": "lane_unblocked",
+          "event_id": 977,
+          "ts": "2026-10-07T14:00:00.000Z"
+        }
+      }
+    ],
+    "counts": {
+      "open": 4,
+      "active": 2,
+      "paused": 1,
+      "blocked": 1
+    },
+    "truncated": false,
+    "generated_at": "2026-10-07T19:01:00.000Z"
+  },
+  "hello_field": {
+    "work_lanes": {
+      "type": "work_lanes.inventory",
+      "lanes": [
+        {
+          "lane_id": "wl-blocked-0001",
+          "title": "Sample daemon deploy",
+          "summary": "Ship the sample candidate to the sample host",
+          "state": "blocked",
+          "state_reason": "fd",
+          "blocker": "Waiting for operator deploy window",
+          "owner_kind": "fd",
+          "version": 4,
+          "updated_at": "2026-10-07T19:00:00.000Z",
+          "first_admitted_at": "2026-10-07T17:00:00.000Z",
+          "done_at": null,
+          "lead": {
+            "stream_id": "fixture-host:v2-lead0001",
+            "generation": "gen-lead-0001",
+            "qualifies": true,
+            "status": "open",
+            "visibility": "default",
+            "presence": {
+              "online": true,
+              "working": false,
+              "capture_liveness": "idle",
+              "last_activity": "2026-10-07T18:55:00Z"
+            },
+            "status_card": {
+              "goal": "Deploy daemon",
+              "active_step": "Await window",
+              "update": null,
+              "eta_at": "2026-10-07T21:00:00Z",
+              "eta_set_at": "2026-10-07T18:00:00Z",
+              "updated_at": "2026-10-07T18:50:00Z"
+            },
+            "eta_stale": false
+          },
+          "visible_chat": {
+            "stream_id": "fixture-host:v2-lead0001",
+            "generation": "gen-lead-0001",
+            "kind": "session",
+            "available": "open"
+          },
+          "last_update": {
+            "update_id": "lane-update:wl-blocked-0001:req-block-1",
+            "kind": "lane_blocked",
+            "event_id": 1043,
+            "ts": "2026-10-07T19:00:00.000Z"
+          }
+        },
+        {
+          "lane_id": "wl-active-0002",
+          "title": "Work lanes mobile slice",
+          "summary": "Header count, lanes list, lane_update card",
+          "state": "active",
+          "state_reason": "fd",
+          "blocker": null,
+          "owner_kind": "fd",
+          "version": 3,
+          "updated_at": "2026-10-07T18:58:00.000Z",
+          "first_admitted_at": "2026-10-07T18:00:00.000Z",
+          "done_at": null,
+          "lead": {
+            "stream_id": "fixture-host:v2-lead0002",
+            "generation": "gen-lead-0002",
+            "qualifies": true,
+            "status": "open",
+            "visibility": "default",
+            "presence": {
+              "online": true,
+              "working": true,
+              "capture_liveness": "idle",
+              "last_activity": "2026-10-07T18:55:00Z"
+            },
+            "status_card": {
+              "goal": "Mobile lanes UI",
+              "active_step": "LanesSurface",
+              "update": null,
+              "eta_at": "2026-10-08T04:00:00Z",
+              "eta_set_at": "2026-10-07T18:30:00Z",
+              "updated_at": "2026-10-07T18:50:00Z"
+            },
+            "eta_stale": false
+          },
+          "visible_chat": {
+            "stream_id": "home:assistant",
+            "generation": null,
+            "kind": "composite",
+            "available": "open"
+          },
+          "last_update": {
+            "update_id": "lane-update:wl-active-0002:adopt:stream:fixture-host:v2-lead0002",
+            "kind": "lane_started",
+            "event_id": 1001,
+            "ts": "2026-10-07T18:00:00.000Z"
+          }
+        },
+        {
+          "lane_id": "wl-paused-0004",
+          "title": "Voice answers web",
+          "summary": "Paused after lead seat closed",
+          "state": "active",
+          "state_reason": "lead_lost",
+          "blocker": null,
+          "owner_kind": "operator",
+          "version": 2,
+          "updated_at": "2026-10-07T18:40:00.000Z",
+          "first_admitted_at": "2026-10-07T16:00:00.000Z",
+          "done_at": null,
+          "lead": {
+            "stream_id": "fixture-host:v2-lead0004",
+            "generation": "gen-lead-0004-old",
+            "qualifies": false,
+            "status": "open",
+            "visibility": "default",
+            "presence": {
+              "online": true,
+              "working": false,
+              "capture_liveness": "idle",
+              "last_activity": "2026-10-07T18:55:00Z"
+            },
+            "status_card": {
+              "goal": "Voice answers",
+              "active_step": null,
+              "update": null,
+              "eta_at": "2026-10-07T20:00:00Z",
+              "eta_set_at": "2026-10-07T16:30:00Z",
+              "updated_at": "2026-10-07T18:50:00Z"
+            },
+            "eta_stale": true
+          },
+          "visible_chat": {
+            "stream_id": "fixture-host:v2-chat0004",
+            "generation": "gen-chat-0004-old",
+            "kind": "session",
+            "available": "unavailable"
+          },
+          "last_update": null
+        },
+        {
+          "lane_id": "wl-paused-0003",
+          "title": "Household boards",
+          "summary": "Deliberately paused by FD",
+          "state": "paused",
+          "state_reason": "fd",
+          "blocker": null,
+          "owner_kind": "operator",
+          "version": 5,
+          "updated_at": "2026-10-07T18:30:00.000Z",
+          "first_admitted_at": "2026-10-07T12:00:00.000Z",
+          "done_at": null,
+          "lead": {
+            "stream_id": "fixture-host:v2-lead0003",
+            "generation": "gen-lead-0003",
+            "qualifies": false,
+            "status": "closed",
+            "visibility": "default",
+            "presence": {
+              "online": false,
+              "working": false,
+              "capture_liveness": "transport_unknown",
+              "last_activity": null
+            },
+            "status_card": {
+              "goal": "Boards",
+              "active_step": null,
+              "update": null,
+              "eta_at": "2026-10-07T15:00:00Z",
+              "eta_set_at": "2026-10-07T12:30:00Z",
+              "updated_at": "2026-10-07T18:50:00Z"
+            },
+            "eta_stale": true
+          },
+          "visible_chat": {
+            "stream_id": "fixture-host:v2-lead0003",
+            "generation": "gen-lead-0003",
+            "kind": "session",
+            "available": "history"
+          },
+          "last_update": {
+            "update_id": "lane-update:wl-paused-0003:req-unblock-3",
+            "kind": "lane_unblocked",
+            "event_id": 977,
+            "ts": "2026-10-07T14:00:00.000Z"
+          }
+        }
+      ],
+      "counts": {
+        "open": 4,
+        "active": 2,
+        "paused": 1,
+        "blocked": 1
+      },
+      "truncated": false,
+      "generated_at": "2026-10-07T19:01:00.000Z"
+    }
+  },
+  "list_reply": {
+    "type": "work_lanes.list.ok",
+    "include_done": true,
+    "lanes": [
+      {
+        "lane_id": "wl-blocked-0001",
+        "title": "Sample daemon deploy",
+        "summary": "Ship the sample candidate to the sample host",
+        "state": "blocked",
+        "state_reason": "fd",
+        "blocker": "Waiting for operator deploy window",
+        "owner_kind": "fd",
+        "version": 4,
+        "updated_at": "2026-10-07T19:00:00.000Z",
+        "first_admitted_at": "2026-10-07T17:00:00.000Z",
+        "done_at": null,
+        "lead": {
+          "stream_id": "fixture-host:v2-lead0001",
+          "generation": "gen-lead-0001",
+          "qualifies": true,
+          "status": "open",
+          "visibility": "default",
+          "presence": {
+            "online": true,
+            "working": false,
+            "capture_liveness": "idle",
+            "last_activity": "2026-10-07T18:55:00Z"
+          },
+          "status_card": {
+            "goal": "Deploy daemon",
+            "active_step": "Await window",
+            "update": null,
+            "eta_at": "2026-10-07T21:00:00Z",
+            "eta_set_at": "2026-10-07T18:00:00Z",
+            "updated_at": "2026-10-07T18:50:00Z"
+          },
+          "eta_stale": false
+        },
+        "visible_chat": {
+          "stream_id": "fixture-host:v2-lead0001",
+          "generation": "gen-lead-0001",
+          "kind": "session",
+          "available": "open"
+        },
+        "last_update": {
+          "update_id": "lane-update:wl-blocked-0001:req-block-1",
+          "kind": "lane_blocked",
+          "event_id": 1043,
+          "ts": "2026-10-07T19:00:00.000Z"
+        }
+      },
+      {
+        "lane_id": "wl-active-0002",
+        "title": "Work lanes mobile slice",
+        "summary": "Header count, lanes list, lane_update card",
+        "state": "active",
+        "state_reason": "fd",
+        "blocker": null,
+        "owner_kind": "fd",
+        "version": 3,
+        "updated_at": "2026-10-07T18:58:00.000Z",
+        "first_admitted_at": "2026-10-07T18:00:00.000Z",
+        "done_at": null,
+        "lead": {
+          "stream_id": "fixture-host:v2-lead0002",
+          "generation": "gen-lead-0002",
+          "qualifies": true,
+          "status": "open",
+          "visibility": "default",
+          "presence": {
+            "online": true,
+            "working": true,
+            "capture_liveness": "idle",
+            "last_activity": "2026-10-07T18:55:00Z"
+          },
+          "status_card": {
+            "goal": "Mobile lanes UI",
+            "active_step": "LanesSurface",
+            "update": null,
+            "eta_at": "2026-10-08T04:00:00Z",
+            "eta_set_at": "2026-10-07T18:30:00Z",
+            "updated_at": "2026-10-07T18:50:00Z"
+          },
+          "eta_stale": false
+        },
+        "visible_chat": {
+          "stream_id": "home:assistant",
+          "generation": null,
+          "kind": "composite",
+          "available": "open"
+        },
+        "last_update": {
+          "update_id": "lane-update:wl-active-0002:adopt:stream:fixture-host:v2-lead0002",
+          "kind": "lane_started",
+          "event_id": 1001,
+          "ts": "2026-10-07T18:00:00.000Z"
+        }
+      },
+      {
+        "lane_id": "wl-paused-0004",
+        "title": "Voice answers web",
+        "summary": "Paused after lead seat closed",
+        "state": "active",
+        "state_reason": "lead_lost",
+        "blocker": null,
+        "owner_kind": "operator",
+        "version": 2,
+        "updated_at": "2026-10-07T18:40:00.000Z",
+        "first_admitted_at": "2026-10-07T16:00:00.000Z",
+        "done_at": null,
+        "lead": {
+          "stream_id": "fixture-host:v2-lead0004",
+          "generation": "gen-lead-0004-old",
+          "qualifies": false,
+          "status": "open",
+          "visibility": "default",
+          "presence": {
+            "online": true,
+            "working": false,
+            "capture_liveness": "idle",
+            "last_activity": "2026-10-07T18:55:00Z"
+          },
+          "status_card": {
+            "goal": "Voice answers",
+            "active_step": null,
+            "update": null,
+            "eta_at": "2026-10-07T20:00:00Z",
+            "eta_set_at": "2026-10-07T16:30:00Z",
+            "updated_at": "2026-10-07T18:50:00Z"
+          },
+          "eta_stale": true
+        },
+        "visible_chat": {
+          "stream_id": "fixture-host:v2-chat0004",
+          "generation": "gen-chat-0004-old",
+          "kind": "session",
+          "available": "unavailable"
+        },
+        "last_update": null
+      },
+      {
+        "lane_id": "wl-paused-0003",
+        "title": "Household boards",
+        "summary": "Deliberately paused by FD",
+        "state": "paused",
+        "state_reason": "fd",
+        "blocker": null,
+        "owner_kind": "operator",
+        "version": 5,
+        "updated_at": "2026-10-07T18:30:00.000Z",
+        "first_admitted_at": "2026-10-07T12:00:00.000Z",
+        "done_at": null,
+        "lead": {
+          "stream_id": "fixture-host:v2-lead0003",
+          "generation": "gen-lead-0003",
+          "qualifies": false,
+          "status": "closed",
+          "visibility": "default",
+          "presence": {
+            "online": false,
+            "working": false,
+            "capture_liveness": "transport_unknown",
+            "last_activity": null
+          },
+          "status_card": {
+            "goal": "Boards",
+            "active_step": null,
+            "update": null,
+            "eta_at": "2026-10-07T15:00:00Z",
+            "eta_set_at": "2026-10-07T12:30:00Z",
+            "updated_at": "2026-10-07T18:50:00Z"
+          },
+          "eta_stale": true
+        },
+        "visible_chat": {
+          "stream_id": "fixture-host:v2-lead0003",
+          "generation": "gen-lead-0003",
+          "kind": "session",
+          "available": "history"
+        },
+        "last_update": {
+          "update_id": "lane-update:wl-paused-0003:req-unblock-3",
+          "kind": "lane_unblocked",
+          "event_id": 977,
+          "ts": "2026-10-07T14:00:00.000Z"
+        }
+      },
+      {
+        "lane_id": "wl-done-0005",
+        "title": "Usage rollup",
+        "summary": "Codex per-session reconciliation",
+        "state": "done",
+        "state_reason": "fd",
+        "blocker": null,
+        "owner_kind": "fd",
+        "version": 6,
+        "updated_at": "2026-10-07T17:30:00.000Z",
+        "first_admitted_at": "2026-10-06T10:00:00.000Z",
+        "done_at": "2026-10-07T17:30:00.000Z",
+        "lead": null,
+        "visible_chat": {
+          "stream_id": "home:assistant",
+          "generation": null,
+          "kind": "composite",
+          "available": "open"
+        },
+        "last_update": {
+          "update_id": "lane-update:wl-done-0005:req-done-5",
+          "kind": "lane_completed",
+          "event_id": 1010,
+          "ts": "2026-10-07T17:30:00.000Z"
+        }
+      }
+    ],
+    "next_before_updated_at": null,
+    "next_before_lane_id": null
+  },
+  "lane_update_events": [
+    {
+      "type": "chat.event",
+      "event": {
+        "stream_id": "home:assistant",
+        "provider": "composite",
+        "kind": "ASSIST_TEXT",
+        "text": "Work lanes mobile slice \u2014 Header count, lanes list, lane_update card",
+        "message_id": "publication:lane-update:wl-active-0002:adopt:stream:fixture-host:v2-lead0002",
+        "reply_to_message_id": null,
+        "reply_to_question_id": null,
+        "publish_kind": "lane_update",
+        "attachments": [],
+        "timestamp": "2026-10-07T18:00:00.000Z",
+        "raw": {
+          "assistant_composite": {
+            "published_by": {
+              "stream_id": "fixture-fd:v2-fdseat",
+              "generation": "gen-fd"
+            }
+          },
+          "publish_kind": "lane_update",
+          "dispatch_id": "",
+          "actor_stream_id": "fixture-fd:v2-fdseat",
+          "lane_update": {
+            "update_id": "lane-update:wl-active-0002:adopt:stream:fixture-host:v2-lead0002",
+            "lane_id": "wl-active-0002",
+            "kind": "lane_started",
+            "summary": "Work lanes mobile slice \u2014 Header count, lanes list, lane_update card",
+            "source": {
+              "type": "adoption",
+              "id": "adopt:stream:fixture-host:v2-lead0002"
+            },
+            "state": "active",
+            "prior_state": null,
+            "owner_kind": "fd",
+            "title": "Work lanes mobile slice",
+            "ts": "2026-10-07T18:00:00.000Z"
+          }
+        },
+        "daemon_seq": 1001
+      }
+    },
+    {
+      "type": "chat.event",
+      "event": {
+        "stream_id": "home:assistant",
+        "provider": "composite",
+        "kind": "ASSIST_TEXT",
+        "text": "Waiting for operator deploy window",
+        "message_id": "publication:lane-update:wl-blocked-0001:req-block-1",
+        "reply_to_message_id": null,
+        "reply_to_question_id": null,
+        "publish_kind": "lane_update",
+        "attachments": [],
+        "timestamp": "2026-10-07T19:00:00.000Z",
+        "raw": {
+          "assistant_composite": {
+            "published_by": {
+              "stream_id": "fixture-fd:v2-fdseat",
+              "generation": "gen-fd"
+            }
+          },
+          "publish_kind": "lane_update",
+          "dispatch_id": "",
+          "actor_stream_id": "fixture-fd:v2-fdseat",
+          "lane_update": {
+            "update_id": "lane-update:wl-blocked-0001:req-block-1",
+            "lane_id": "wl-blocked-0001",
+            "kind": "lane_blocked",
+            "summary": "Waiting for operator deploy window",
+            "source": {
+              "type": "transition",
+              "id": "req-block-1"
+            },
+            "state": "blocked",
+            "prior_state": "active",
+            "owner_kind": "fd",
+            "title": "Sample daemon deploy",
+            "ts": "2026-10-07T19:00:00.000Z"
+          }
+        },
+        "daemon_seq": 1043
+      }
+    },
+    {
+      "type": "chat.event",
+      "event": {
+        "stream_id": "home:assistant",
+        "provider": "composite",
+        "kind": "ASSIST_TEXT",
+        "text": "Blocker cleared: design review",
+        "message_id": "publication:lane-update:wl-paused-0003:req-unblock-3",
+        "reply_to_message_id": null,
+        "reply_to_question_id": null,
+        "publish_kind": "lane_update",
+        "attachments": [],
+        "timestamp": "2026-10-07T14:00:00.000Z",
+        "raw": {
+          "assistant_composite": {
+            "published_by": {
+              "stream_id": "fixture-fd:v2-fdseat",
+              "generation": "gen-fd"
+            }
+          },
+          "publish_kind": "lane_update",
+          "dispatch_id": "",
+          "actor_stream_id": "fixture-fd:v2-fdseat",
+          "lane_update": {
+            "update_id": "lane-update:wl-paused-0003:req-unblock-3",
+            "lane_id": "wl-paused-0003",
+            "kind": "lane_unblocked",
+            "summary": "Blocker cleared: design review",
+            "source": {
+              "type": "transition",
+              "id": "req-unblock-3"
+            },
+            "state": "paused",
+            "prior_state": "blocked",
+            "owner_kind": "operator",
+            "title": "Household boards",
+            "ts": "2026-10-07T14:00:00.000Z"
+          }
+        },
+        "daemon_seq": 977
+      }
+    },
+    {
+      "type": "chat.event",
+      "event": {
+        "stream_id": "home:assistant",
+        "provider": "composite",
+        "kind": "ASSIST_TEXT",
+        "text": "Rollup shipped on main 355f12ab",
+        "message_id": "publication:lane-update:wl-done-0005:req-done-5",
+        "reply_to_message_id": null,
+        "reply_to_question_id": null,
+        "publish_kind": "lane_update",
+        "attachments": [],
+        "timestamp": "2026-10-07T17:30:00.000Z",
+        "raw": {
+          "assistant_composite": {
+            "published_by": {
+              "stream_id": "fixture-fd:v2-fdseat",
+              "generation": "gen-fd"
+            }
+          },
+          "publish_kind": "lane_update",
+          "dispatch_id": "",
+          "actor_stream_id": "fixture-fd:v2-fdseat",
+          "lane_update": {
+            "update_id": "lane-update:wl-done-0005:req-done-5",
+            "lane_id": "wl-done-0005",
+            "kind": "lane_completed",
+            "summary": "Rollup shipped on main 355f12ab",
+            "source": {
+              "type": "transition",
+              "id": "req-done-5"
+            },
+            "state": "done",
+            "prior_state": "active",
+            "owner_kind": "fd",
+            "title": "Usage rollup",
+            "ts": "2026-10-07T17:30:00.000Z"
+          }
+        },
+        "daemon_seq": 1010
+      }
+    },
+    {
+      "type": "chat.event",
+      "event": {
+        "stream_id": "home:assistant",
+        "provider": "composite",
+        "kind": "ASSIST_TEXT",
+        "text": "Deploy daemon before web activation",
+        "message_id": "publication:lane-update:wl-blocked-0001:decision-deploy-order",
+        "reply_to_message_id": null,
+        "reply_to_question_id": null,
+        "publish_kind": "lane_update",
+        "attachments": [],
+        "timestamp": "2026-10-07T18:20:00.000Z",
+        "raw": {
+          "assistant_composite": {
+            "published_by": {
+              "stream_id": "fixture-fd:v2-fdseat",
+              "generation": "gen-fd"
+            }
+          },
+          "publish_kind": "lane_update",
+          "dispatch_id": "",
+          "actor_stream_id": "fixture-fd:v2-fdseat",
+          "lane_update": {
+            "update_id": "lane-update:wl-blocked-0001:decision-deploy-order",
+            "lane_id": "wl-blocked-0001",
+            "kind": "major_decision",
+            "summary": "Deploy daemon before web activation",
+            "source": {
+              "type": "decision",
+              "id": "decision-deploy-order"
+            },
+            "state": "active",
+            "prior_state": "active",
+            "owner_kind": "fd",
+            "title": "Sample daemon deploy",
+            "ts": "2026-10-07T18:20:00.000Z"
+          }
+        },
+        "daemon_seq": 1020
+      }
+    },
+    {
+      "type": "chat.event",
+      "event": {
+        "stream_id": "home:assistant",
+        "provider": "composite",
+        "kind": "ASSIST_TEXT",
+        "text": "Store and operations merged",
+        "message_id": "publication:lane-update:wl-active-0002:m1-store",
+        "reply_to_message_id": null,
+        "reply_to_question_id": null,
+        "publish_kind": "lane_update",
+        "attachments": [],
+        "timestamp": "2026-10-07T18:45:00.000Z",
+        "raw": {
+          "assistant_composite": {
+            "published_by": {
+              "stream_id": "fixture-fd:v2-fdseat",
+              "generation": "gen-fd"
+            }
+          },
+          "publish_kind": "lane_update",
+          "dispatch_id": "",
+          "actor_stream_id": "fixture-fd:v2-fdseat",
+          "lane_update": {
+            "update_id": "lane-update:wl-active-0002:m1-store",
+            "lane_id": "wl-active-0002",
+            "kind": "milestone",
+            "summary": "Store and operations merged",
+            "source": {
+              "type": "milestone",
+              "id": "m1-store",
+              "grouped_ids": [
+                "m1-store-a",
+                "m1-store-b"
+              ]
+            },
+            "state": "active",
+            "prior_state": "active",
+            "owner_kind": "fd",
+            "title": "Work lanes mobile slice",
+            "ts": "2026-10-07T18:45:00.000Z"
+          }
+        },
+        "daemon_seq": 1030
+      }
+    }
+  ],
+  "legacy_render": "A client that does not branch on publish_kind 'lane_update' renders event.text as assistant prose.",
+  "expected": {
+    "order": [
+      "wl-blocked-0001",
+      "wl-active-0002",
+      "wl-paused-0004",
+      "wl-paused-0003"
+    ],
+    "header_count": 4,
+    "header_states": [
+      "active",
+      "paused",
+      "blocked"
+    ],
+    "done_in_lanes": false,
+    "tap": {
+      "wl-blocked-0001": {
+        "action": "open_chat",
+        "stream_id": "fixture-host:v2-lead0001"
+      },
+      "wl-active-0002": {
+        "action": "open_chat",
+        "stream_id": "home:assistant"
+      },
+      "wl-paused-0004": {
+        "action": "unavailable"
+      },
+      "wl-paused-0003": {
+        "action": "history",
+        "stream_id": "fixture-host:v2-lead0003",
+        "generation": "gen-lead-0003"
+      }
+    },
+    "eta_stale": {
+      "wl-blocked-0001": false,
+      "wl-active-0002": false,
+      "wl-paused-0004": true,
+      "wl-paused-0003": true
+    },
+    "session_inventory_note": "wl-active-0002's lead has 3 hidden workers and 2 unrelated visible sessions exist; counts.open stays 4 (V11)."
+  },
+  "enums": {
+    "state": [
+      "active",
+      "paused",
+      "blocked",
+      "done"
+    ],
+    "state_reason": [
+      "fd",
+      "lead_lost",
+      "operator_confirmed",
+      "reopened"
+    ],
+    "owner_kind": [
+      "operator",
+      "fd"
+    ],
+    "visible_chat.kind": [
+      "composite",
+      "session"
+    ],
+    "visible_chat.available": [
+      "open",
+      "history",
+      "unavailable"
+    ],
+    "update_kind": [
+      "major_decision",
+      "lane_started",
+      "lane_completed",
+      "lane_blocked",
+      "lane_unblocked",
+      "milestone"
+    ],
+    "source.type": [
+      "transition",
+      "decision",
+      "milestone",
+      "adoption"
+    ],
+    "presence.capture_liveness": [
+      "idle",
+      "wedged_unknown",
+      "transport_unknown"
+    ]
+  },
+  "fixture_version": 3,
+  "progress_v2": [
+    {
+      "name": "active_progress",
+      "rows": [
+        {
+          "lane_id": "wl-000000000000000000000001",
+          "title": "Build model bridges",
+          "summary": "Assemble and inspect miniature spans.",
+          "work_state": "active",
+          "work_state_reason": "fd",
+          "version": 2,
+          "owner_kind": "operator",
+          "updated_at": "2026-01-02T00:00:00.000Z",
+          "first_admitted_at": "2026-01-02T00:00:00.000Z",
+          "bound_stream_id": "fixture-host:lead",
+          "bound_generation": "fixture-generation",
+          "_lead_row": {
+            "status": "open",
+            "visibility": "default"
+          },
+          "visible_chat_stream_id": "fixture-chat:assistant",
+          "_chat_kind": "composite",
+          "_chat_available": "open",
+          "_qualifies": true,
+          "_members": [
+            {
+              "spec_id": "spec_demo__item_1",
+              "title": "Model bridge 1",
+              "status": "in_progress",
+              "terminal": null,
+              "ac_checked": 1,
+              "ac_total": 2,
+              "estimate": {
+                "p25": 2,
+                "p75": 4,
+                "median": 3,
+                "provisional": true
+              },
+              "status_text": "Model prepared.",
+              "next_action_text": "Inspect the paper span.",
+              "source_changed_at": "2026-01-02T00:00:00.000Z",
+              "observation": {
+                "quality": "fresh",
+                "observed_at": "2026-01-02T00:00:00.000Z",
+                "error": null
+              },
+              "obs_rev": 1
+            },
+            {
+              "spec_id": "spec_demo__item_2",
+              "title": "Model bridge 2",
+              "status": "completed",
+              "terminal": "completed",
+              "ac_checked": 2,
+              "ac_total": 2,
+              "estimate": {
+                "p25": 2,
+                "p75": 4,
+                "median": 3,
+                "provisional": true
+              },
+              "status_text": "Model prepared.",
+              "next_action_text": "Inspect the paper span.",
+              "source_changed_at": "2026-01-02T00:00:00.000Z",
+              "observation": {
+                "quality": "fresh",
+                "observed_at": "2026-01-02T00:00:00.000Z",
+                "error": null
+              },
+              "obs_rev": 1
+            }
+          ],
+          "no_spec_reason": null,
+          "blocker": null
+        }
+      ],
+      "work_index": {
+        "available": true,
+        "root_configured": true,
+        "snapshot_at": "2026-01-02T00:00:00.000Z",
+        "last_sweep_at": "2026-01-02T00:00:00.000Z",
+        "error": null
+      },
+      "frame": {
+        "type": "work_lanes.inventory",
+        "lanes": [
+          {
+            "lane_id": "wl-000000000000000000000001",
+            "title": "Build model bridges",
+            "summary": "Assemble and inspect miniature spans.",
+            "state": "active",
+            "state_reason": "fd",
+            "blocker": null,
+            "owner_kind": "operator",
+            "version": 2,
+            "updated_at": "2026-01-02T00:00:00.000Z",
+            "first_admitted_at": "2026-01-02T00:00:00.000Z",
+            "done_at": null,
+            "lead": {
+              "stream_id": "fixture-host:lead",
+              "generation": "fixture-generation",
+              "qualifies": true,
+              "status": "open",
+              "visibility": "default",
+              "presence": {
+                "online": false,
+                "working": false,
+                "capture_liveness": "transport_unknown",
+                "last_activity": null
+              },
+              "status_card": {
+                "goal": null,
+                "active_step": null,
+                "update": null,
+                "eta_at": null,
+                "eta_set_at": null,
+                "updated_at": null
+              },
+              "eta_stale": false
+            },
+            "visible_chat": {
+              "stream_id": "fixture-chat:assistant",
+              "generation": null,
+              "kind": "composite",
+              "available": "open"
+            },
+            "last_update": null,
+            "members": [
+              {
+                "spec_id": "spec_demo__item_1",
+                "title": "Model bridge 1",
+                "status": "in_progress",
+                "terminal": null,
+                "ac_checked": 1,
+                "ac_total": 2,
+                "estimate": {
+                  "p25": 2,
+                  "p75": 4,
+                  "median": 3,
+                  "provisional": true
+                },
+                "status_text": "Model prepared.",
+                "next_action_text": "Inspect the paper span.",
+                "source_changed_at": "2026-01-02T00:00:00.000Z",
+                "observation": {
+                  "quality": "fresh",
+                  "observed_at": "2026-01-02T00:00:00.000Z",
+                  "error": null
+                },
+                "obs_rev": 1
+              },
+              {
+                "spec_id": "spec_demo__item_2",
+                "title": "Model bridge 2",
+                "status": "completed",
+                "terminal": "completed",
+                "ac_checked": 2,
+                "ac_total": 2,
+                "estimate": {
+                  "p25": 2,
+                  "p75": 4,
+                  "median": 3,
+                  "provisional": true
+                },
+                "status_text": "Model prepared.",
+                "next_action_text": "Inspect the paper span.",
+                "source_changed_at": "2026-01-02T00:00:00.000Z",
+                "observation": {
+                  "quality": "fresh",
+                  "observed_at": "2026-01-02T00:00:00.000Z",
+                  "error": null
+                },
+                "obs_rev": 1
+              }
+            ],
+            "members_total": 2,
+            "no_spec_reason": null,
+            "items_total": 2,
+            "items_completed": 1,
+            "items_dropped": 0,
+            "items_open": 1,
+            "items_unresolved": 0,
+            "ac_checked": 3,
+            "ac_total": 4,
+            "ac_members": 2,
+            "open_estimate_h": {
+              "p25": 2,
+              "p75": 4,
+              "median": 3
+            },
+            "open_estimated": 1,
+            "estimate_complete": true,
+            "freshness_at": "2026-01-02T00:00:00.000Z"
+          }
+        ],
+        "counts": {
+          "open": 1,
+          "active": 1,
+          "paused": 0,
+          "blocked": 0
+        },
+        "truncated": false,
+        "generated_at": "2026-01-02T00:00:00.000Z",
+        "work_index": {
+          "available": true,
+          "root_configured": true,
+          "snapshot_at": "2026-01-02T00:00:00.000Z",
+          "last_sweep_at": "2026-01-02T00:00:00.000Z",
+          "error": null
+        }
+      }
+    },
+    {
+      "name": "paused_leadless",
+      "rows": [
+        {
+          "lane_id": "wl-000000000000000000000002",
+          "title": "Build model bridges",
+          "summary": "Assemble and inspect miniature spans.",
+          "work_state": "paused",
+          "work_state_reason": "fd",
+          "version": 2,
+          "owner_kind": "operator",
+          "updated_at": "2026-01-02T00:00:00.000Z",
+          "first_admitted_at": "2026-01-02T00:00:00.000Z",
+          "bound_stream_id": null,
+          "bound_generation": null,
+          "_lead_row": null,
+          "visible_chat_stream_id": "fixture-chat:assistant",
+          "_chat_kind": "composite",
+          "_chat_available": "open",
+          "_qualifies": false,
+          "_members": [
+            {
+              "spec_id": "spec_demo__item_1",
+              "title": "Model bridge 1",
+              "status": "completed",
+              "terminal": "completed",
+              "ac_checked": 2,
+              "ac_total": 2,
+              "estimate": {
+                "p25": 2,
+                "p75": 4,
+                "median": 3,
+                "provisional": true
+              },
+              "status_text": "Model prepared.",
+              "next_action_text": "Inspect the paper span.",
+              "source_changed_at": "2026-01-02T00:00:00.000Z",
+              "observation": {
+                "quality": "fresh",
+                "observed_at": "2026-01-02T00:00:00.000Z",
+                "error": null
+              },
+              "obs_rev": 1
+            },
+            {
+              "spec_id": "spec_demo__item_2",
+              "title": "Model bridge 2",
+              "status": "deprecated",
+              "terminal": "deprecated",
+              "ac_checked": 1,
+              "ac_total": 2,
+              "estimate": {
+                "p25": 2,
+                "p75": 4,
+                "median": 3,
+                "provisional": true
+              },
+              "status_text": "Model prepared.",
+              "next_action_text": "Inspect the paper span.",
+              "source_changed_at": "2026-01-02T00:00:00.000Z",
+              "observation": {
+                "quality": "fresh",
+                "observed_at": "2026-01-02T00:00:00.000Z",
+                "error": null
+              },
+              "obs_rev": 1
+            },
+            {
+              "spec_id": "spec_demo__item_3",
+              "title": "Model bridge 3",
+              "status": "in_progress",
+              "terminal": null,
+              "ac_checked": 1,
+              "ac_total": 2,
+              "estimate": {
+                "p25": 2,
+                "p75": 4,
+                "median": 3,
+                "provisional": true
+              },
+              "status_text": "Model prepared.",
+              "next_action_text": "Inspect the paper span.",
+              "source_changed_at": "2026-01-02T00:00:00.000Z",
+              "observation": {
+                "quality": "fresh",
+                "observed_at": "2026-01-02T00:00:00.000Z",
+                "error": null
+              },
+              "obs_rev": 1
+            }
+          ],
+          "no_spec_reason": null,
+          "blocker": null
+        }
+      ],
+      "work_index": {
+        "available": true,
+        "root_configured": true,
+        "snapshot_at": "2026-01-02T00:00:00.000Z",
+        "last_sweep_at": "2026-01-02T00:00:00.000Z",
+        "error": null
+      },
+      "frame": {
+        "type": "work_lanes.inventory",
+        "lanes": [
+          {
+            "lane_id": "wl-000000000000000000000002",
+            "title": "Build model bridges",
+            "summary": "Assemble and inspect miniature spans.",
+            "state": "paused",
+            "state_reason": "fd",
+            "blocker": null,
+            "owner_kind": "operator",
+            "version": 2,
+            "updated_at": "2026-01-02T00:00:00.000Z",
+            "first_admitted_at": "2026-01-02T00:00:00.000Z",
+            "done_at": null,
+            "lead": null,
+            "visible_chat": {
+              "stream_id": "fixture-chat:assistant",
+              "generation": null,
+              "kind": "composite",
+              "available": "open"
+            },
+            "last_update": null,
+            "members": [
+              {
+                "spec_id": "spec_demo__item_1",
+                "title": "Model bridge 1",
+                "status": "completed",
+                "terminal": "completed",
+                "ac_checked": 2,
+                "ac_total": 2,
+                "estimate": {
+                  "p25": 2,
+                  "p75": 4,
+                  "median": 3,
+                  "provisional": true
+                },
+                "status_text": "Model prepared.",
+                "next_action_text": "Inspect the paper span.",
+                "source_changed_at": "2026-01-02T00:00:00.000Z",
+                "observation": {
+                  "quality": "fresh",
+                  "observed_at": "2026-01-02T00:00:00.000Z",
+                  "error": null
+                },
+                "obs_rev": 1
+              },
+              {
+                "spec_id": "spec_demo__item_2",
+                "title": "Model bridge 2",
+                "status": "deprecated",
+                "terminal": "deprecated",
+                "ac_checked": 1,
+                "ac_total": 2,
+                "estimate": {
+                  "p25": 2,
+                  "p75": 4,
+                  "median": 3,
+                  "provisional": true
+                },
+                "status_text": "Model prepared.",
+                "next_action_text": "Inspect the paper span.",
+                "source_changed_at": "2026-01-02T00:00:00.000Z",
+                "observation": {
+                  "quality": "fresh",
+                  "observed_at": "2026-01-02T00:00:00.000Z",
+                  "error": null
+                },
+                "obs_rev": 1
+              },
+              {
+                "spec_id": "spec_demo__item_3",
+                "title": "Model bridge 3",
+                "status": "in_progress",
+                "terminal": null,
+                "ac_checked": 1,
+                "ac_total": 2,
+                "estimate": {
+                  "p25": 2,
+                  "p75": 4,
+                  "median": 3,
+                  "provisional": true
+                },
+                "status_text": "Model prepared.",
+                "next_action_text": "Inspect the paper span.",
+                "source_changed_at": "2026-01-02T00:00:00.000Z",
+                "observation": {
+                  "quality": "fresh",
+                  "observed_at": "2026-01-02T00:00:00.000Z",
+                  "error": null
+                },
+                "obs_rev": 1
+              }
+            ],
+            "members_total": 3,
+            "no_spec_reason": null,
+            "items_total": 3,
+            "items_completed": 1,
+            "items_dropped": 1,
+            "items_open": 1,
+            "items_unresolved": 0,
+            "ac_checked": 4,
+            "ac_total": 6,
+            "ac_members": 3,
+            "open_estimate_h": {
+              "p25": 2,
+              "p75": 4,
+              "median": 3
+            },
+            "open_estimated": 1,
+            "estimate_complete": true,
+            "freshness_at": "2026-01-02T00:00:00.000Z"
+          }
+        ],
+        "counts": {
+          "open": 1,
+          "active": 0,
+          "paused": 1,
+          "blocked": 0
+        },
+        "truncated": false,
+        "generated_at": "2026-01-02T00:00:00.000Z",
+        "work_index": {
+          "available": true,
+          "root_configured": true,
+          "snapshot_at": "2026-01-02T00:00:00.000Z",
+          "last_sweep_at": "2026-01-02T00:00:00.000Z",
+          "error": null
+        }
+      }
+    },
+    {
+      "name": "blocked",
+      "rows": [
+        {
+          "lane_id": "wl-000000000000000000000003",
+          "title": "Build model bridges",
+          "summary": "Assemble and inspect miniature spans.",
+          "work_state": "blocked",
+          "work_state_reason": "fd",
+          "version": 2,
+          "owner_kind": "operator",
+          "updated_at": "2026-01-02T00:00:00.000Z",
+          "first_admitted_at": "2026-01-02T00:00:00.000Z",
+          "bound_stream_id": null,
+          "bound_generation": null,
+          "_lead_row": null,
+          "visible_chat_stream_id": "fixture-chat:assistant",
+          "_chat_kind": "composite",
+          "_chat_available": "open",
+          "_qualifies": false,
+          "_members": [
+            {
+              "spec_id": "spec_demo__item_1",
+              "title": "Model bridge 1",
+              "status": "in_progress",
+              "terminal": null,
+              "ac_checked": 1,
+              "ac_total": 2,
+              "estimate": {
+                "p25": 2,
+                "p75": 4,
+                "median": 3,
+                "provisional": true
+              },
+              "status_text": "Model prepared.",
+              "next_action_text": "Inspect the paper span.",
+              "source_changed_at": "2026-01-02T00:00:00.000Z",
+              "observation": {
+                "quality": "fresh",
+                "observed_at": "2026-01-02T00:00:00.000Z",
+                "error": null
+              },
+              "obs_rev": 1
+            }
+          ],
+          "no_spec_reason": null,
+          "blocker": "Materials needed."
+        }
+      ],
+      "work_index": {
+        "available": true,
+        "root_configured": true,
+        "snapshot_at": "2026-01-02T00:00:00.000Z",
+        "last_sweep_at": "2026-01-02T00:00:00.000Z",
+        "error": null
+      },
+      "frame": {
+        "type": "work_lanes.inventory",
+        "lanes": [
+          {
+            "lane_id": "wl-000000000000000000000003",
+            "title": "Build model bridges",
+            "summary": "Assemble and inspect miniature spans.",
+            "state": "blocked",
+            "state_reason": "fd",
+            "blocker": "Materials needed.",
+            "owner_kind": "operator",
+            "version": 2,
+            "updated_at": "2026-01-02T00:00:00.000Z",
+            "first_admitted_at": "2026-01-02T00:00:00.000Z",
+            "done_at": null,
+            "lead": null,
+            "visible_chat": {
+              "stream_id": "fixture-chat:assistant",
+              "generation": null,
+              "kind": "composite",
+              "available": "open"
+            },
+            "last_update": null,
+            "members": [
+              {
+                "spec_id": "spec_demo__item_1",
+                "title": "Model bridge 1",
+                "status": "in_progress",
+                "terminal": null,
+                "ac_checked": 1,
+                "ac_total": 2,
+                "estimate": {
+                  "p25": 2,
+                  "p75": 4,
+                  "median": 3,
+                  "provisional": true
+                },
+                "status_text": "Model prepared.",
+                "next_action_text": "Inspect the paper span.",
+                "source_changed_at": "2026-01-02T00:00:00.000Z",
+                "observation": {
+                  "quality": "fresh",
+                  "observed_at": "2026-01-02T00:00:00.000Z",
+                  "error": null
+                },
+                "obs_rev": 1
+              }
+            ],
+            "members_total": 1,
+            "no_spec_reason": null,
+            "items_total": 1,
+            "items_completed": 0,
+            "items_dropped": 0,
+            "items_open": 1,
+            "items_unresolved": 0,
+            "ac_checked": 1,
+            "ac_total": 2,
+            "ac_members": 1,
+            "open_estimate_h": {
+              "p25": 2,
+              "p75": 4,
+              "median": 3
+            },
+            "open_estimated": 1,
+            "estimate_complete": true,
+            "freshness_at": "2026-01-02T00:00:00.000Z"
+          }
+        ],
+        "counts": {
+          "open": 1,
+          "active": 0,
+          "paused": 0,
+          "blocked": 1
+        },
+        "truncated": false,
+        "generated_at": "2026-01-02T00:00:00.000Z",
+        "work_index": {
+          "available": true,
+          "root_configured": true,
+          "snapshot_at": "2026-01-02T00:00:00.000Z",
+          "last_sweep_at": "2026-01-02T00:00:00.000Z",
+          "error": null
+        }
+      }
+    },
+    {
+      "name": "missing_member",
+      "rows": [
+        {
+          "lane_id": "wl-000000000000000000000004",
+          "title": "Build model bridges",
+          "summary": "Assemble and inspect miniature spans.",
+          "work_state": "paused",
+          "work_state_reason": "fd",
+          "version": 2,
+          "owner_kind": "operator",
+          "updated_at": "2026-01-02T00:00:00.000Z",
+          "first_admitted_at": "2026-01-02T00:00:00.000Z",
+          "bound_stream_id": null,
+          "bound_generation": null,
+          "_lead_row": null,
+          "visible_chat_stream_id": "fixture-chat:assistant",
+          "_chat_kind": "composite",
+          "_chat_available": "open",
+          "_qualifies": false,
+          "_members": [
+            {
+              "spec_id": "spec_demo__item_1",
+              "title": null,
+              "status": "missing",
+              "terminal": null,
+              "ac_checked": null,
+              "ac_total": null,
+              "estimate": null,
+              "status_text": null,
+              "next_action_text": null,
+              "source_changed_at": null,
+              "observation": {
+                "quality": "missing",
+                "observed_at": null,
+                "error": null
+              },
+              "obs_rev": 1
+            }
+          ],
+          "no_spec_reason": null,
+          "blocker": null
+        }
+      ],
+      "work_index": {
+        "available": true,
+        "root_configured": true,
+        "snapshot_at": "2026-01-02T00:00:00.000Z",
+        "last_sweep_at": "2026-01-02T00:00:00.000Z",
+        "error": null
+      },
+      "frame": {
+        "type": "work_lanes.inventory",
+        "lanes": [
+          {
+            "lane_id": "wl-000000000000000000000004",
+            "title": "Build model bridges",
+            "summary": "Assemble and inspect miniature spans.",
+            "state": "paused",
+            "state_reason": "fd",
+            "blocker": null,
+            "owner_kind": "operator",
+            "version": 2,
+            "updated_at": "2026-01-02T00:00:00.000Z",
+            "first_admitted_at": "2026-01-02T00:00:00.000Z",
+            "done_at": null,
+            "lead": null,
+            "visible_chat": {
+              "stream_id": "fixture-chat:assistant",
+              "generation": null,
+              "kind": "composite",
+              "available": "open"
+            },
+            "last_update": null,
+            "members": [
+              {
+                "spec_id": "spec_demo__item_1",
+                "title": null,
+                "status": "missing",
+                "terminal": null,
+                "ac_checked": null,
+                "ac_total": null,
+                "estimate": null,
+                "status_text": null,
+                "next_action_text": null,
+                "source_changed_at": null,
+                "observation": {
+                  "quality": "missing",
+                  "observed_at": null,
+                  "error": null
+                },
+                "obs_rev": 1
+              }
+            ],
+            "members_total": 1,
+            "no_spec_reason": null,
+            "items_total": 1,
+            "items_completed": 0,
+            "items_dropped": 0,
+            "items_open": 0,
+            "items_unresolved": 1,
+            "ac_checked": null,
+            "ac_total": null,
+            "ac_members": 0,
+            "open_estimate_h": null,
+            "open_estimated": 0,
+            "estimate_complete": true,
+            "freshness_at": "2026-01-02T00:00:00.000Z"
+          }
+        ],
+        "counts": {
+          "open": 1,
+          "active": 0,
+          "paused": 1,
+          "blocked": 0
+        },
+        "truncated": false,
+        "generated_at": "2026-01-02T00:00:00.000Z",
+        "work_index": {
+          "available": true,
+          "root_configured": true,
+          "snapshot_at": "2026-01-02T00:00:00.000Z",
+          "last_sweep_at": "2026-01-02T00:00:00.000Z",
+          "error": null
+        }
+      }
+    },
+    {
+      "name": "ambiguous_member",
+      "rows": [
+        {
+          "lane_id": "wl-000000000000000000000005",
+          "title": "Build model bridges",
+          "summary": "Assemble and inspect miniature spans.",
+          "work_state": "paused",
+          "work_state_reason": "fd",
+          "version": 2,
+          "owner_kind": "operator",
+          "updated_at": "2026-01-02T00:00:00.000Z",
+          "first_admitted_at": "2026-01-02T00:00:00.000Z",
+          "bound_stream_id": null,
+          "bound_generation": null,
+          "_lead_row": null,
+          "visible_chat_stream_id": "fixture-chat:assistant",
+          "_chat_kind": "composite",
+          "_chat_available": "open",
+          "_qualifies": false,
+          "_members": [
+            {
+              "spec_id": "spec_demo__item_1",
+              "title": null,
+              "status": "ambiguous",
+              "terminal": null,
+              "ac_checked": null,
+              "ac_total": null,
+              "estimate": null,
+              "status_text": null,
+              "next_action_text": null,
+              "source_changed_at": null,
+              "observation": {
+                "quality": "ambiguous",
+                "observed_at": null,
+                "error": null
+              },
+              "obs_rev": 1
+            }
+          ],
+          "no_spec_reason": null,
+          "blocker": null
+        }
+      ],
+      "work_index": {
+        "available": true,
+        "root_configured": true,
+        "snapshot_at": "2026-01-02T00:00:00.000Z",
+        "last_sweep_at": "2026-01-02T00:00:00.000Z",
+        "error": null
+      },
+      "frame": {
+        "type": "work_lanes.inventory",
+        "lanes": [
+          {
+            "lane_id": "wl-000000000000000000000005",
+            "title": "Build model bridges",
+            "summary": "Assemble and inspect miniature spans.",
+            "state": "paused",
+            "state_reason": "fd",
+            "blocker": null,
+            "owner_kind": "operator",
+            "version": 2,
+            "updated_at": "2026-01-02T00:00:00.000Z",
+            "first_admitted_at": "2026-01-02T00:00:00.000Z",
+            "done_at": null,
+            "lead": null,
+            "visible_chat": {
+              "stream_id": "fixture-chat:assistant",
+              "generation": null,
+              "kind": "composite",
+              "available": "open"
+            },
+            "last_update": null,
+            "members": [
+              {
+                "spec_id": "spec_demo__item_1",
+                "title": null,
+                "status": "ambiguous",
+                "terminal": null,
+                "ac_checked": null,
+                "ac_total": null,
+                "estimate": null,
+                "status_text": null,
+                "next_action_text": null,
+                "source_changed_at": null,
+                "observation": {
+                  "quality": "ambiguous",
+                  "observed_at": null,
+                  "error": null
+                },
+                "obs_rev": 1
+              }
+            ],
+            "members_total": 1,
+            "no_spec_reason": null,
+            "items_total": 1,
+            "items_completed": 0,
+            "items_dropped": 0,
+            "items_open": 0,
+            "items_unresolved": 1,
+            "ac_checked": null,
+            "ac_total": null,
+            "ac_members": 0,
+            "open_estimate_h": null,
+            "open_estimated": 0,
+            "estimate_complete": true,
+            "freshness_at": "2026-01-02T00:00:00.000Z"
+          }
+        ],
+        "counts": {
+          "open": 1,
+          "active": 0,
+          "paused": 1,
+          "blocked": 0
+        },
+        "truncated": false,
+        "generated_at": "2026-01-02T00:00:00.000Z",
+        "work_index": {
+          "available": true,
+          "root_configured": true,
+          "snapshot_at": "2026-01-02T00:00:00.000Z",
+          "last_sweep_at": "2026-01-02T00:00:00.000Z",
+          "error": null
+        }
+      }
+    },
+    {
+      "name": "missing_estimate",
+      "rows": [
+        {
+          "lane_id": "wl-000000000000000000000006",
+          "title": "Build model bridges",
+          "summary": "Assemble and inspect miniature spans.",
+          "work_state": "paused",
+          "work_state_reason": "fd",
+          "version": 2,
+          "owner_kind": "operator",
+          "updated_at": "2026-01-02T00:00:00.000Z",
+          "first_admitted_at": "2026-01-02T00:00:00.000Z",
+          "bound_stream_id": null,
+          "bound_generation": null,
+          "_lead_row": null,
+          "visible_chat_stream_id": "fixture-chat:assistant",
+          "_chat_kind": "composite",
+          "_chat_available": "open",
+          "_qualifies": false,
+          "_members": [
+            {
+              "spec_id": "spec_demo__item_1",
+              "title": "Model bridge 1",
+              "status": "in_progress",
+              "terminal": null,
+              "ac_checked": 1,
+              "ac_total": 2,
+              "estimate": null,
+              "status_text": "Model prepared.",
+              "next_action_text": "Inspect the paper span.",
+              "source_changed_at": "2026-01-02T00:00:00.000Z",
+              "observation": {
+                "quality": "fresh",
+                "observed_at": "2026-01-02T00:00:00.000Z",
+                "error": null
+              },
+              "obs_rev": 1
+            }
+          ],
+          "no_spec_reason": null,
+          "blocker": null
+        }
+      ],
+      "work_index": {
+        "available": true,
+        "root_configured": true,
+        "snapshot_at": "2026-01-02T00:00:00.000Z",
+        "last_sweep_at": "2026-01-02T00:00:00.000Z",
+        "error": null
+      },
+      "frame": {
+        "type": "work_lanes.inventory",
+        "lanes": [
+          {
+            "lane_id": "wl-000000000000000000000006",
+            "title": "Build model bridges",
+            "summary": "Assemble and inspect miniature spans.",
+            "state": "paused",
+            "state_reason": "fd",
+            "blocker": null,
+            "owner_kind": "operator",
+            "version": 2,
+            "updated_at": "2026-01-02T00:00:00.000Z",
+            "first_admitted_at": "2026-01-02T00:00:00.000Z",
+            "done_at": null,
+            "lead": null,
+            "visible_chat": {
+              "stream_id": "fixture-chat:assistant",
+              "generation": null,
+              "kind": "composite",
+              "available": "open"
+            },
+            "last_update": null,
+            "members": [
+              {
+                "spec_id": "spec_demo__item_1",
+                "title": "Model bridge 1",
+                "status": "in_progress",
+                "terminal": null,
+                "ac_checked": 1,
+                "ac_total": 2,
+                "estimate": null,
+                "status_text": "Model prepared.",
+                "next_action_text": "Inspect the paper span.",
+                "source_changed_at": "2026-01-02T00:00:00.000Z",
+                "observation": {
+                  "quality": "fresh",
+                  "observed_at": "2026-01-02T00:00:00.000Z",
+                  "error": null
+                },
+                "obs_rev": 1
+              }
+            ],
+            "members_total": 1,
+            "no_spec_reason": null,
+            "items_total": 1,
+            "items_completed": 0,
+            "items_dropped": 0,
+            "items_open": 1,
+            "items_unresolved": 0,
+            "ac_checked": 1,
+            "ac_total": 2,
+            "ac_members": 1,
+            "open_estimate_h": null,
+            "open_estimated": 0,
+            "estimate_complete": false,
+            "freshness_at": "2026-01-02T00:00:00.000Z"
+          }
+        ],
+        "counts": {
+          "open": 1,
+          "active": 0,
+          "paused": 1,
+          "blocked": 0
+        },
+        "truncated": false,
+        "generated_at": "2026-01-02T00:00:00.000Z",
+        "work_index": {
+          "available": true,
+          "root_configured": true,
+          "snapshot_at": "2026-01-02T00:00:00.000Z",
+          "last_sweep_at": "2026-01-02T00:00:00.000Z",
+          "error": null
+        }
+      }
+    },
+    {
+      "name": "no_spec",
+      "rows": [
+        {
+          "lane_id": "wl-000000000000000000000007",
+          "title": "Build model bridges",
+          "summary": "Assemble and inspect miniature spans.",
+          "work_state": "paused",
+          "work_state_reason": "fd",
+          "version": 2,
+          "owner_kind": "operator",
+          "updated_at": "2026-01-02T00:00:00.000Z",
+          "first_admitted_at": "2026-01-02T00:00:00.000Z",
+          "bound_stream_id": null,
+          "bound_generation": null,
+          "_lead_row": null,
+          "visible_chat_stream_id": "fixture-chat:assistant",
+          "_chat_kind": "composite",
+          "_chat_available": "open",
+          "_qualifies": false,
+          "_members": [],
+          "no_spec_reason": "Exploratory conversation.",
+          "blocker": null
+        }
+      ],
+      "work_index": {
+        "available": true,
+        "root_configured": true,
+        "snapshot_at": "2026-01-02T00:00:00.000Z",
+        "last_sweep_at": "2026-01-02T00:00:00.000Z",
+        "error": null
+      },
+      "frame": {
+        "type": "work_lanes.inventory",
+        "lanes": [
+          {
+            "lane_id": "wl-000000000000000000000007",
+            "title": "Build model bridges",
+            "summary": "Assemble and inspect miniature spans.",
+            "state": "paused",
+            "state_reason": "fd",
+            "blocker": null,
+            "owner_kind": "operator",
+            "version": 2,
+            "updated_at": "2026-01-02T00:00:00.000Z",
+            "first_admitted_at": "2026-01-02T00:00:00.000Z",
+            "done_at": null,
+            "lead": null,
+            "visible_chat": {
+              "stream_id": "fixture-chat:assistant",
+              "generation": null,
+              "kind": "composite",
+              "available": "open"
+            },
+            "last_update": null,
+            "members": [],
+            "members_total": 0,
+            "no_spec_reason": "Exploratory conversation.",
+            "items_total": 0,
+            "items_completed": 0,
+            "items_dropped": 0,
+            "items_open": 0,
+            "items_unresolved": 0,
+            "ac_checked": null,
+            "ac_total": null,
+            "ac_members": 0,
+            "open_estimate_h": null,
+            "open_estimated": 0,
+            "estimate_complete": true,
+            "freshness_at": "2026-01-02T00:00:00.000Z"
+          }
+        ],
+        "counts": {
+          "open": 1,
+          "active": 0,
+          "paused": 1,
+          "blocked": 0
+        },
+        "truncated": false,
+        "generated_at": "2026-01-02T00:00:00.000Z",
+        "work_index": {
+          "available": true,
+          "root_configured": true,
+          "snapshot_at": "2026-01-02T00:00:00.000Z",
+          "last_sweep_at": "2026-01-02T00:00:00.000Z",
+          "error": null
+        }
+      }
+    },
+    {
+      "name": "index_unavailable",
+      "rows": [
+        {
+          "lane_id": "wl-000000000000000000000008",
+          "title": "Build model bridges",
+          "summary": "Assemble and inspect miniature spans.",
+          "work_state": "paused",
+          "work_state_reason": "fd",
+          "version": 2,
+          "owner_kind": "operator",
+          "updated_at": "2026-01-02T00:00:00.000Z",
+          "first_admitted_at": "2026-01-02T00:00:00.000Z",
+          "bound_stream_id": null,
+          "bound_generation": null,
+          "_lead_row": null,
+          "visible_chat_stream_id": "fixture-chat:assistant",
+          "_chat_kind": "composite",
+          "_chat_available": "open",
+          "_qualifies": false,
+          "_members": [
+            {
+              "spec_id": "spec_demo__item_1",
+              "title": "Model bridge 1",
+              "status": "in_progress",
+              "terminal": null,
+              "ac_checked": 1,
+              "ac_total": 2,
+              "estimate": {
+                "p25": 2,
+                "p75": 4,
+                "median": 3,
+                "provisional": true
+              },
+              "status_text": "Model prepared.",
+              "next_action_text": "Inspect the paper span.",
+              "source_changed_at": "2026-01-02T00:00:00.000Z",
+              "observation": {
+                "quality": "stale",
+                "observed_at": "2026-01-02T00:00:00.000Z",
+                "error": null
+              },
+              "obs_rev": 1
+            }
+          ],
+          "no_spec_reason": null,
+          "blocker": null
+        }
+      ],
+      "work_index": {
+        "available": false,
+        "root_configured": true,
+        "snapshot_at": "2026-01-02T00:00:00.000Z",
+        "last_sweep_at": "2026-01-02T00:00:00.000Z",
+        "error": "work_root_unavailable"
+      },
+      "frame": {
+        "type": "work_lanes.inventory",
+        "lanes": [
+          {
+            "lane_id": "wl-000000000000000000000008",
+            "title": "Build model bridges",
+            "summary": "Assemble and inspect miniature spans.",
+            "state": "paused",
+            "state_reason": "fd",
+            "blocker": null,
+            "owner_kind": "operator",
+            "version": 2,
+            "updated_at": "2026-01-02T00:00:00.000Z",
+            "first_admitted_at": "2026-01-02T00:00:00.000Z",
+            "done_at": null,
+            "lead": null,
+            "visible_chat": {
+              "stream_id": "fixture-chat:assistant",
+              "generation": null,
+              "kind": "composite",
+              "available": "open"
+            },
+            "last_update": null,
+            "members": [
+              {
+                "spec_id": "spec_demo__item_1",
+                "title": "Model bridge 1",
+                "status": "in_progress",
+                "terminal": null,
+                "ac_checked": 1,
+                "ac_total": 2,
+                "estimate": {
+                  "p25": 2,
+                  "p75": 4,
+                  "median": 3,
+                  "provisional": true
+                },
+                "status_text": "Model prepared.",
+                "next_action_text": "Inspect the paper span.",
+                "source_changed_at": "2026-01-02T00:00:00.000Z",
+                "observation": {
+                  "quality": "stale",
+                  "observed_at": "2026-01-02T00:00:00.000Z",
+                  "error": null
+                },
+                "obs_rev": 1
+              }
+            ],
+            "members_total": 1,
+            "no_spec_reason": null,
+            "items_total": 1,
+            "items_completed": 0,
+            "items_dropped": 0,
+            "items_open": 1,
+            "items_unresolved": 0,
+            "ac_checked": 1,
+            "ac_total": 2,
+            "ac_members": 1,
+            "open_estimate_h": {
+              "p25": 2,
+              "p75": 4,
+              "median": 3
+            },
+            "open_estimated": 1,
+            "estimate_complete": true,
+            "freshness_at": "2026-01-02T00:00:00.000Z"
+          }
+        ],
+        "counts": {
+          "open": 1,
+          "active": 0,
+          "paused": 1,
+          "blocked": 0
+        },
+        "truncated": false,
+        "generated_at": "2026-01-02T00:00:00.000Z",
+        "work_index": {
+          "available": false,
+          "root_configured": true,
+          "snapshot_at": "2026-01-02T00:00:00.000Z",
+          "last_sweep_at": "2026-01-02T00:00:00.000Z",
+          "error": "work_root_unavailable"
+        }
+      }
+    }
+  ]
+}

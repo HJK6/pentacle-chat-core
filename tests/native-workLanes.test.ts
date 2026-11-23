@@ -1,0 +1,390 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import test from 'node:test';
+import {
+  applyPentacleSnapshotMessage,
+  applyWorkLanesInventory,
+  initialPentacleStreamState,
+  normalizeWorkLanesInventory,
+  parseLaneUpdateEvent,
+  parseWorkLaneShow,
+  resolveWorkLaneTap,
+  selectOpenLaneCount,
+  selectWorkLanes,
+  type PentacleEvent,
+} from '../src/index.ts';
+
+// Shared parity fixture ("work lanes projection v1"): the daemon Python test and
+// both client chat-core suites assert against this one file.
+const fixture = JSON.parse(readFileSync(new URL('./fixtures/work-lanes-inventory-native.json', import.meta.url), 'utf8'));
+
+test('inventory frame normalizes to the fixture lanes in server order with no reordering', () => {
+  const inventory = normalizeWorkLanesInventory(fixture.inventory_frame);
+  assert.ok(inventory);
+  assert.deepEqual(inventory.lanes.map((lane) => lane.lane_id), fixture.expected.order);
+  assert.deepEqual(inventory.lanes, fixture.inventory_frame.lanes);
+  assert.equal(inventory.counts.open, fixture.expected.header_count);
+  assert.equal(inventory.truncated, false);
+});
+
+test('hello work_lanes field and push frame produce the same state', () => {
+  const pushed = applyWorkLanesInventory(initialPentacleStreamState, fixture.inventory_frame);
+  const hello = applyPentacleSnapshotMessage(initialPentacleStreamState, {
+    sessions: [],
+    work_lanes: fixture.hello_field.work_lanes,
+  });
+  assert.deepEqual(selectWorkLanes(hello), selectWorkLanes(pushed));
+  assert.equal(selectOpenLaneCount(hello), fixture.expected.header_count);
+});
+
+test('a snapshot without work_lanes keeps the last lane inventory', () => {
+  const pushed = applyWorkLanesInventory(initialPentacleStreamState, fixture.inventory_frame);
+  const next = applyPentacleSnapshotMessage(pushed, { sessions: [] });
+  assert.equal(selectOpenLaneCount(next), fixture.expected.header_count);
+});
+
+test('header count is counts.open, never derived from sessions', () => {
+  assert.equal(selectOpenLaneCount(initialPentacleStreamState), 0);
+  const state = applyWorkLanesInventory(initialPentacleStreamState, {
+    ...fixture.inventory_frame,
+    lanes: fixture.inventory_frame.lanes.slice(0, 2),
+    counts: { open: 9, active: 1, paused: 2, blocked: 6 },
+    truncated: true,
+  });
+  assert.equal(selectOpenLaneCount(state), 9);
+  assert.equal(selectWorkLanes(state).length, 2);
+});
+
+test('done lanes never appear in the header list', () => {
+  const done = { ...fixture.inventory_frame.lanes[0], lane_id: 'wl-done-x', state: 'done' };
+  const inventory = normalizeWorkLanesInventory({
+    ...fixture.inventory_frame,
+    lanes: [done, ...fixture.inventory_frame.lanes],
+  });
+  assert.ok(inventory);
+  assert.equal(inventory.lanes.some((lane) => lane.state === 'done'), false);
+  assert.deepEqual(inventory.lanes.map((lane) => lane.lane_id), fixture.expected.order);
+});
+
+test('active without a qualifying lead presents lead_lost; deliberate pauses and blocks survive', () => {
+  const base = fixture.inventory_frame.lanes[1];
+  const unqualified = { ...base, lane_id: 'wl-x1', lead: { ...base.lead, qualifies: false } };
+  const leadless = { ...base, lane_id: 'wl-x2', lead: null };
+  const blocked = { ...fixture.inventory_frame.lanes[0], lane_id: 'wl-x3', lead: null };
+  const paused = { ...base, lane_id: 'wl-x4', state: 'paused', state_reason: 'fd', lead: null };
+  const inventory = normalizeWorkLanesInventory({
+    ...fixture.inventory_frame, lanes: [unqualified, leadless, blocked, paused],
+  });
+  assert.ok(inventory);
+  const byId = Object.fromEntries(inventory.lanes.map((lane) => [lane.lane_id, lane]));
+  assert.equal(byId['wl-x1'].state, 'active');
+  assert.equal(byId['wl-x1'].state_reason, 'lead_lost');
+  assert.equal(byId['wl-x2'].state, 'active');
+  assert.equal(byId['wl-x2'].state_reason, 'lead_lost');
+  assert.equal(byId['wl-x3'].state, 'blocked');
+  assert.equal(byId['wl-x4'].state, 'paused');
+  assert.equal(byId['wl-x4'].state_reason, 'fd');
+});
+
+// Synthetic equivalents of fresh member-work projections with an old or absent lead.
+for (const leadKind of ['closed', 'absent', 'nonqualifying'] as const) {
+  test(`active/members_working survives snapshot, inventory and detail with ${leadKind} lead`, () => {
+    const base = fixture.inventory_frame.lanes[1];
+    const lead = leadKind === 'absent' ? null : {
+      ...base.lead, qualifies: false, status: leadKind === 'closed' ? 'closed' : 'open',
+      presence: { ...base.lead.presence, online: false, working: false },
+    };
+    const lane = { ...base, state_reason: 'members_working', lead, stale: false,
+      freshness_at: '2026-01-02T00:00:00.000Z' };
+    const frame = { ...fixture.inventory_frame, lanes: [lane] };
+    const snapshot = applyPentacleSnapshotMessage(initialPentacleStreamState, { sessions: [], work_lanes: frame });
+    const pushed = applyWorkLanesInventory(initialPentacleStreamState, frame);
+    const detail = parseWorkLaneShow({ type: 'work_lanes.show.ok', lane: { lane_id: lane.lane_id },
+      projection: lane, members: [], updates: [], events: [] });
+    assert.ok(detail);
+    for (const normalized of [selectWorkLanes(snapshot)[0], selectWorkLanes(pushed)[0], detail.projection!]) {
+      assert.equal(normalized.state, 'active');
+      assert.equal(normalized.state_reason, 'members_working');
+      assert.equal(normalized.freshness_at, lane.freshness_at);
+      assert.deepEqual(normalized.lead, lead);
+      assert.deepEqual(normalized.visible_chat, base.visible_chat);
+    }
+  });
+}
+
+test('malformed frames and lanes are rejected without throwing', () => {
+  assert.equal(normalizeWorkLanesInventory(null), null);
+  assert.equal(normalizeWorkLanesInventory({ type: 'work_lanes.inventory' }), null);
+  const inventory = normalizeWorkLanesInventory({
+    ...fixture.inventory_frame,
+    lanes: [{ lane_id: 'bad' }, { ...fixture.inventory_frame.lanes[1], state: 'exploded' }, fixture.inventory_frame.lanes[1]],
+  });
+  assert.ok(inventory);
+  assert.deepEqual(inventory.lanes.map((lane) => lane.lane_id), ['wl-active-0002']);
+});
+
+test('tap targets match the fixture per visible_chat.available', () => {
+  const inventory = normalizeWorkLanesInventory(fixture.inventory_frame)!;
+  for (const lane of inventory.lanes) {
+    assert.deepEqual(resolveWorkLaneTap(lane), fixture.expected.tap[lane.lane_id], lane.lane_id);
+  }
+});
+
+test('eta_stale comes from the daemon, not a client clock', () => {
+  const inventory = normalizeWorkLanesInventory(fixture.inventory_frame)!;
+  for (const lane of inventory.lanes) {
+    assert.equal(lane.lead?.eta_stale ?? false, fixture.expected.eta_stale[lane.lane_id], lane.lane_id);
+  }
+});
+
+test('lane_update events parse; unrelated events do not', () => {
+  const events = fixture.lane_update_events.map((frame: { event: PentacleEvent }) => frame.event);
+  const parsed = events.map((event: PentacleEvent) => parseLaneUpdateEvent(event));
+  assert.ok(parsed.every((update: unknown) => update !== null));
+  assert.deepEqual(parsed.map((update: { kind: string }) => update.kind),
+    events.map((event: PentacleEvent) => (event.raw as any).lane_update.kind));
+  assert.equal(parseLaneUpdateEvent({ ...events[0], publish_kind: 'status' }), null);
+  assert.equal(parseLaneUpdateEvent({ ...events[0], raw: {} }), null);
+  assert.equal(parseLaneUpdateEvent({ ...events[0], raw: { lane_update: { kind: 'worker_start' } } }), null);
+});
+
+test('an unsupported visible_chat.kind fails closed as unavailable, never a tap target', () => {
+  const base = fixture.inventory_frame.lanes[0];
+  for (const kind of [undefined, 'hidden', 7]) {
+    const inventory = normalizeWorkLanesInventory({
+      ...fixture.inventory_frame,
+      lanes: [{ ...base, visible_chat: { ...base.visible_chat, kind, available: 'open' } }],
+    });
+    assert.ok(inventory);
+    assert.equal(inventory.lanes.length, 1);
+    assert.deepEqual(resolveWorkLaneTap(inventory.lanes[0]), { action: 'unavailable' });
+  }
+});
+
+test('counts must be non-negative integers; a malformed inventory keeps the previous projection', () => {
+  for (const open of [-1, 1.5, '4', Number.NaN]) {
+    assert.equal(normalizeWorkLanesInventory({ ...fixture.inventory_frame, counts: { ...fixture.inventory_frame.counts, open } }), null);
+  }
+  const good = applyWorkLanesInventory(initialPentacleStreamState, fixture.inventory_frame);
+  const bad = applyWorkLanesInventory(good, { ...fixture.inventory_frame, counts: { open: -1, active: 0, paused: 0, blocked: 0 } });
+  assert.equal(selectOpenLaneCount(bad), fixture.expected.header_count);
+  assert.ok(normalizeWorkLanesInventory({ ...fixture.inventory_frame, counts: undefined }));
+});
+
+// Sweep matrix (QA r1): every present-but-invalid shape of every top-level and nested field.
+const lane0 = () => fixture.inventory_frame.lanes[0];
+const lane1 = () => fixture.inventory_frame.lanes[1];
+const INVALID_SHAPES: unknown[] = [null, 7, 'x', true, [], {}];
+
+test('sweep: present counts of any non-object shape, or missing any of the four counts, reject the inventory', () => {
+  for (const counts of [null, 7, 'x', true, [], {}, { open: 4 }, { open: 4, active: 1, paused: 2 }]) {
+    assert.equal(normalizeWorkLanesInventory({ ...fixture.inventory_frame, counts }), null, JSON.stringify(counts));
+  }
+  const good = applyWorkLanesInventory(initialPentacleStreamState, fixture.inventory_frame);
+  const truncated = { ...fixture.inventory_frame, lanes: fixture.inventory_frame.lanes.slice(0, 2), truncated: true,
+    counts: { open: 9, active: 1, paused: 2, blocked: 6 } };
+  const withBadCounts = applyWorkLanesInventory(applyWorkLanesInventory(good, truncated), { ...truncated, counts: null });
+  assert.equal(selectOpenLaneCount(withBadCounts), 9);
+  const { counts: _omitted, ...withoutCounts } = fixture.inventory_frame;
+  assert.equal(normalizeWorkLanesInventory(withoutCounts)?.counts.open, 4);
+});
+
+test('sweep: present non-boolean truncated and non-string generated_at reject the inventory', () => {
+  for (const bad of [null, 1, 'yes', [], {}]) {
+    assert.equal(normalizeWorkLanesInventory({ ...fixture.inventory_frame, truncated: bad }), null, `truncated ${JSON.stringify(bad)}`);
+  }
+  for (const bad of [null, 7, [], {}]) {
+    assert.equal(normalizeWorkLanesInventory({ ...fixture.inventory_frame, generated_at: bad }), null, `generated_at ${JSON.stringify(bad)}`);
+  }
+});
+
+test('sweep: a present-but-invalid visible_chat keeps the lane and fails the tap closed', () => {
+  const chats: unknown[] = [
+    ...INVALID_SHAPES, { available: 'open' }, { stream_id: 's' }, { stream_id: 's', available: 'bogus' },
+    { stream_id: 's', available: 'open', kind: 'nope' }, { stream_id: 7, available: 'open', kind: 'session' },
+    { stream_id: 's', available: 'history', kind: 'session', generation: 7 },
+  ];
+  for (const visible_chat of chats) {
+    const inventory = normalizeWorkLanesInventory({ ...fixture.inventory_frame, lanes: [{ ...lane0(), visible_chat }] });
+    assert.ok(inventory, JSON.stringify(visible_chat));
+    assert.equal(inventory.lanes.length, 1, JSON.stringify(visible_chat));
+    assert.deepEqual(resolveWorkLaneTap(inventory.lanes[0]), { action: 'unavailable' }, JSON.stringify(visible_chat));
+  }
+});
+
+test('sweep: invalid leads mark active lanes lead_lost; deliberate pauses and blocks survive', () => {
+  for (const lead of [...INVALID_SHAPES, { stream_id: 7 }, { stream_id: '' }]) {
+    const inventory = normalizeWorkLanesInventory({
+      ...fixture.inventory_frame,
+      lanes: [{ ...lane1(), lead }, { ...lane0(), lane_id: 'wl-b', lead },
+        { ...lane1(), lane_id: 'wl-p', state: 'paused', state_reason: 'fd', lead }],
+    });
+    assert.ok(inventory, JSON.stringify(lead));
+    const [active, blocked, paused] = inventory.lanes;
+    assert.equal(active.state, 'active', JSON.stringify(lead));
+    assert.equal(active.state_reason, 'lead_lost', JSON.stringify(lead));
+    assert.equal(active.lead, null);
+    assert.equal(blocked.state, 'blocked');
+    assert.equal(paused.state, 'paused', JSON.stringify(lead));
+    assert.equal(paused.state_reason, 'fd', JSON.stringify(lead));
+  }
+  for (const nested of INVALID_SHAPES) {
+    const inventory = normalizeWorkLanesInventory({
+      ...fixture.inventory_frame,
+      lanes: [{ ...lane1(), lead: { ...lane1().lead, presence: nested, status_card: nested } }],
+    });
+    const lead = inventory!.lanes[0].lead!;
+    assert.equal(lead.presence.online, false, JSON.stringify(nested));
+    assert.equal(lead.status_card.eta_at, null);
+  }
+});
+
+test('sweep: invalid scalar lane fields take safe defaults without throwing or dropping the lane', () => {
+  const bad = { ...lane0(), version: 'x', title: 5, summary: null, blocker: 7, updated_at: [], last_update: 'x' };
+  const inventory = normalizeWorkLanesInventory({ ...fixture.inventory_frame, lanes: [bad] });
+  assert.ok(inventory);
+  const [lane] = inventory.lanes;
+  assert.equal(lane.version, 0);
+  assert.equal(lane.title, '');
+  assert.equal(lane.blocker, null);
+  assert.equal(lane.last_update, null);
+});
+
+test('sweep: a lane with an invalid identity, state or owner is dropped; duplicate lane ids keep the first', () => {
+  const lanes = [
+    { ...lane0(), lane_id: 7 }, { ...lane0(), lane_id: '' }, { ...lane0(), state: null }, { ...lane0(), owner_kind: 'x' },
+    lane1(), { ...lane1(), title: 'duplicate must be ignored' }, 'x', null, [],
+  ];
+  const inventory = normalizeWorkLanesInventory({ ...fixture.inventory_frame, lanes });
+  assert.ok(inventory);
+  assert.deepEqual(inventory.lanes.map((lane) => lane.lane_id), ['wl-active-0002']);
+  assert.equal(inventory.lanes[0].title, lane1().title);
+});
+
+test('sweep: lane_update parsing rejects every present-but-invalid nested shape without throwing', () => {
+  const base = fixture.lane_update_events[0].event;
+  const withUpdate = (patch: Record<string, unknown>) => ({ ...base, raw: { lane_update: { ...base.raw.lane_update, ...patch } } });
+  for (const field of ['kind', 'update_id', 'lane_id', 'summary']) {
+    for (const bad of [null, 7, [], {}]) {
+      assert.equal(parseLaneUpdateEvent(withUpdate({ [field]: bad })), null, `${field} ${JSON.stringify(bad)}`);
+    }
+  }
+  for (const raw of INVALID_SHAPES) assert.equal(parseLaneUpdateEvent({ ...base, raw }), null);
+  for (const lane_update of INVALID_SHAPES) assert.equal(parseLaneUpdateEvent({ ...base, raw: { lane_update } }), null);
+  const loose = parseLaneUpdateEvent(withUpdate({ source: 'x', state: 'bogus', prior_state: 7, owner_kind: [], title: 5, ts: null }));
+  assert.ok(loose);
+  assert.equal(loose.state, null);
+  assert.equal(loose.title, '');
+});
+
+// QA r2 repair (advisor ruling 6bcd63e1): bounded delta.
+test('visible_chat with a present non-string generation fails closed whatever the availability', () => {
+  for (const available of ['open', 'history', 'unavailable']) {
+    for (const generation of [7, true, [], {}, 0]) {
+      const inventory = normalizeWorkLanesInventory({
+        ...fixture.inventory_frame,
+        lanes: [{ ...lane0(), visible_chat: { stream_id: 's', kind: 'session', available, generation } }],
+      });
+      assert.ok(inventory, `${available} ${JSON.stringify(generation)}`);
+      assert.equal(inventory.lanes.length, 1);
+      assert.equal(inventory.lanes[0].visible_chat.available, 'unavailable', `${available} ${JSON.stringify(generation)}`);
+      assert.deepEqual(resolveWorkLaneTap(inventory.lanes[0]), { action: 'unavailable' });
+    }
+  }
+  // null/absent generation stays valid for an open pointer (composite and open session chats carry none).
+  for (const generation of [null, undefined]) {
+    const inventory = normalizeWorkLanesInventory({
+      ...fixture.inventory_frame,
+      lanes: [{ ...lane0(), visible_chat: { stream_id: 's', kind: 'composite', available: 'open', generation } }],
+    });
+    assert.deepEqual(resolveWorkLaneTap(inventory!.lanes[0]), { action: 'open_chat', stream_id: 's' });
+  }
+});
+
+test('frame and lanes shapes: every non-object frame and non-array lanes is rejected', () => {
+  for (const frame of [undefined, null, 7, 'x', true, []]) {
+    assert.equal(normalizeWorkLanesInventory(frame), null, `frame ${JSON.stringify(frame)}`);
+  }
+  for (const lanes of [undefined, null, 7, 'x', true, {}]) {
+    assert.equal(normalizeWorkLanesInventory({ ...fixture.inventory_frame, lanes }), null, `lanes ${JSON.stringify(lanes)}`);
+  }
+  const kept = applyWorkLanesInventory(applyWorkLanesInventory(initialPentacleStreamState, fixture.inventory_frame), 'x');
+  assert.equal(selectOpenLaneCount(kept), fixture.expected.header_count);
+});
+
+test('counts: each of open/active/paused/blocked rejects every invalid value, and a missing key rejects', () => {
+  const frame = fixture.inventory_frame;
+  for (const key of ['open', 'active', 'paused', 'blocked']) {
+    for (const bad of [-1, 1.5, '3', null, Number.NaN, Infinity, [], {}, true]) {
+      assert.equal(normalizeWorkLanesInventory({ ...frame, counts: { ...frame.counts, [key]: bad } }), null, `${key}=${String(bad)}`);
+    }
+    const { [key]: _gone, ...missing } = frame.counts;
+    assert.equal(normalizeWorkLanesInventory({ ...frame, counts: missing }), null, `missing ${key}`);
+  }
+  assert.ok(normalizeWorkLanesInventory({ ...frame, counts: { open: 0, active: 0, paused: 0, blocked: 0 } }));
+});
+
+const dotLane = { label: 'Dot', working: 1, queued: 2, review: 0, verified_at: '2026-11-10T10:00:00Z' };
+const dotMember = { label: 'Dot', ref: 'sample-packet', state: 'working', verified_at: dotLane.verified_at };
+const latest = { kind: 'review_passed', at: dotLane.verified_at };
+const optionalLane = (extra: Record<string, unknown>) => normalizeWorkLanesInventory({ ...fixture.inventory_frame, lanes: [{ ...fixture.inventory_frame.lanes[0], ...extra }] })!.lanes[0];
+const optionalMember = (extra: Record<string, unknown>) => optionalLane({ members: [{ spec_id: 'sample', ...extra }] }).members![0];
+
+test('optional activity retains valid words and null, omits invalid values without dropping the lane', () => {
+  for (const value of ['working', 'waiting_on_dot', 'waiting_on_you', 'blocked', 'idle', null]) {
+    const lane = optionalLane({ activity: value });
+    assert.ok(lane); assert.equal(lane.activity, value);
+  }
+  assert.equal(optionalLane({ activity: 'unknown' }).activity, 'unknown');
+  for (const value of [undefined, 1, {}, [], true]) {
+    const lane = optionalLane({ activity: value });
+    assert.ok(lane); assert.equal(Object.hasOwn(lane, 'activity'), false);
+  }
+});
+
+test('lane external validates its own object and never drops the lane or other optional fields', () => {
+  assert.deepEqual(optionalLane({ external: dotLane }).external, dotLane);
+  for (const external of [undefined, null, [], 'Dot', 2, {}, { ...dotLane, label: '' }, { ...dotLane, label: 7 },
+    { ...dotLane, working: -1 }, { ...dotLane, queued: 1.5 }, { ...dotLane, review: 'unknown' },
+    { ...dotLane, verified_at: null }, { ...dotLane, verified_at: 'invalid' }]) {
+    const lane = optionalLane({ external, activity: 'blocked' });
+    assert.ok(lane); assert.equal(Object.hasOwn(lane, 'external'), false); assert.equal(lane.activity, 'blocked');
+  }
+});
+
+test('member external keeps valid entries and drops only malformed entries, never the member', () => {
+  for (const state of ['working', 'review', 'queued']) {
+    const entry = { ...dotMember, state };
+    assert.deepEqual(optionalMember({ external: [entry] }).external, [entry]);
+  }
+  assert.deepEqual(optionalMember({ external: [] }).external, []);
+  for (const external of [undefined, null, {}, 'Dot', 2]) {
+    const member = optionalMember({ external, latest_event: latest });
+    assert.equal(member.spec_id, 'sample'); assert.equal(Object.hasOwn(member, 'external'), false); assert.deepEqual(member.latest_event, latest);
+  }
+  for (const bad of [null, 'Dot', {}, { ...dotMember, state: 'unknown' }, { ...dotMember, ref: '' },
+    { ...dotMember, label: 1 }, { ...dotMember, verified_at: null }, { ...dotMember, verified_at: 'invalid' }]) {
+    const member = optionalMember({ external: [bad, dotMember], latest_event: latest });
+    assert.equal(member.spec_id, 'sample'); assert.deepEqual(member.external, [dotMember]); assert.deepEqual(member.latest_event, latest);
+  }
+});
+
+test('latest event retains supported kinds and null while ignoring invalid objects', () => {
+  for (const kind of ['review_passed', 'review_failed', 'reported_done']) {
+    const event = { ...latest, kind };
+    assert.deepEqual(optionalMember({ latest_event: event }).latest_event, event);
+  }
+  assert.equal(optionalMember({ latest_event: null }).latest_event, null);
+  for (const latest_event of [undefined, [], 'done', 1, {}, { ...latest, kind: 'unknown' }, { ...latest, at: null }, { ...latest, at: 'invalid' }]) {
+    const member = optionalMember({ latest_event, external: [dotMember] });
+    assert.equal(member.spec_id, 'sample'); assert.equal(Object.hasOwn(member, 'latest_event'), false); assert.deepEqual(member.external, [dotMember]);
+  }
+});
+
+test('detail parser carries the same optional fields as inventory normalization', () => {
+  const lane = { ...fixture.inventory_frame.lanes[0], activity: 'working', external: dotLane };
+  const member = { spec_id: 'sample', external: [dotMember], latest_event: latest };
+  const show = parseWorkLaneShow({ type: 'work_lanes.show.ok', lane_id: lane.lane_id, projection: lane, members: [member], updates: [], spec_changes: [], events: [] });
+  assert.ok(show); assert.equal(show.projection?.activity, 'working'); assert.deepEqual(show.projection?.external, dotLane);
+  assert.deepEqual(show.members[0].external, [dotMember]); assert.deepEqual(show.members[0].latest_event, latest);
+});

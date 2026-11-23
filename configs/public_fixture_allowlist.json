@@ -1,9 +1,16 @@
 {
-  "version": 1,
   "fixtures": {
     "tests/agentQuestionChatRender.test.ts": "Synthetic identities in routing, rendering, protocol or isolation test fixtures.",
     "tests/chatListSelector.test.ts": "Synthetic identities in routing, rendering, protocol or isolation test fixtures.",
+    "tests/fixtures/trusted_notification_answer_wire-native.json": "Existing public synthetic host labels are part of this contract fixture.",
+    "tests/laneFlowFields.test.ts": "Existing public synthetic host labels are part of this contract fixture.",
+    "tests/legacyActivityPresentation.test.ts": "Existing public synthetic host labels are part of this contract fixture.",
+    "tests/messageEnvelopes.test.ts": "Existing public synthetic host labels are part of this contract fixture.",
+    "tests/native-messageIdentityOrdering.test.ts": "Existing public synthetic host labels are part of this contract fixture.",
+    "tests/providerWrapper.test.ts": "Existing public synthetic host labels are part of this contract fixture.",
     "tests/questionAnswerFormat.test.ts": "Synthetic identities in routing, rendering, protocol or isolation test fixtures.",
+    "tests/trustedStatusOrigin.test.ts": "Existing public synthetic host labels are part of this contract fixture.",
     "tests/unifiedFeed.test.ts": "Synthetic identities in routing, rendering, protocol or isolation test fixtures."
-  }
+  },
+  "version": 1
 }

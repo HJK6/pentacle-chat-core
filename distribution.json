@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "paths": [
+    ".gitignore",
+    "LICENSE",
+    "README.md",
+    "distribution.json",
+    "lane_hues.json",
+    "lane_icons.json",
+    "package.json",
+    "package-lock.json",
+    "scripts/verified-copy.cjs",
+    "scripts/verified-copy.d.cts",
+    "src",
+    "tests",
+    "tsconfig.json",
+    "tsconfig.test.json"
+  ]
+}

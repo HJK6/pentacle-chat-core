@@ -1,4 +1,5 @@
 import type { OptimisticSendState, PentacleEvent } from '../types/pentacle';
+import { normalizeSubmissionText, providerDisplayText } from './providerWrapper';
 
 // Live reconcile window: a server USER echo arriving within this many ms of an
 // optimistic send's created_at reconciles it. Mirrors the mobile store's and
@@ -27,7 +28,7 @@ export function parseServerEventTimeStrict(event: PentacleEvent): number | null 
  *   - event.kind === 'USER' (case-insensitive)
  *   - NOT client_origin (i.e. a true server-origin echo, not our own visual row)
  *   - same stream_id
- *   - same text
+ *   - same display text under the daemon's submission normalization
  *   - |parseServerEventTimeStrict(event) - send.created_at| <= windowMs
  *
  * Status gating (queued/dispatched/acked/indeterminate/echoed) is the caller's
@@ -37,7 +38,7 @@ export function parseServerEventTimeStrict(event: PentacleEvent): number | null 
  * window constant while sharing one matcher.
  */
 export function optimisticMatchesServerUser(
-  send: Pick<OptimisticSendState, 'stream_id' | 'text' | 'created_at' | 'optimistic_id'>,
+  send: Pick<OptimisticSendState, 'stream_id' | 'text' | 'created_at' | 'optimistic_id' | 'message_id'>,
   serverEvent: PentacleEvent,
   windowMs: number,
 ): boolean {
@@ -45,7 +46,31 @@ export function optimisticMatchesServerUser(
   if (serverEvent.client_origin === true) return false;
   if (serverEvent.stream_id !== send.stream_id) return false;
   if (serverEvent.optimistic_id) return serverEvent.optimistic_id === send.optimistic_id;
-  if (serverEvent.text !== send.text) return false;
+  if (serverEvent.message_id && send.message_id) return serverEvent.message_id === send.message_id;
+  if (normalizeSubmissionText(providerDisplayText(serverEvent)) !== normalizeSubmissionText(send.text)) return false;
   const parsedTime = parseServerEventTimeStrict(serverEvent);
   return parsedTime !== null && Math.abs(parsedTime - send.created_at) <= windowMs;
+}
+
+/**
+ * Match one daemon USER echo that represents a FIFO batch of queued sends.
+ * Codex's composite payload uses one LF between paragraphs.  The explicit
+ * queue/status/order guards keep a retry, reordered batch, partial batch, or
+ * already-addressed echo from settling an optimistic row accidentally.
+ */
+export function findMatchingCompositeQueuedOptimisticIds(
+  event: Pick<PentacleEvent, 'kind' | 'text' | 'stream_id' | 'optimistic_id'>,
+  sends: Iterable<Pick<OptimisticSendState, 'optimistic_id' | 'stream_id' | 'text' | 'created_at' | 'queued_at' | 'status'>>,
+): string[] {
+  if (String(event.kind || '').toUpperCase() !== 'USER' || event.optimistic_id) return [];
+  const queuedStatuses = new Set<OptimisticSendState['status']>([
+    'queued', 'dispatched', 'acked', 'indeterminate', 'echoed', 'failed',
+  ]);
+  const queued = Array.from(sends)
+    .filter((send) => send.stream_id === event.stream_id && send.queued_at !== undefined && queuedStatuses.has(send.status))
+    .sort((left, right) => left.created_at - right.created_at);
+  if (queued.length < 2) return [];
+  return queued.map((send) => send.text).join('\n') === String(event.text || '')
+    ? queued.map((send) => send.optimistic_id)
+    : [];
 }

@@ -1,36 +1,43 @@
 # pentacle-chat-core
 
-A small, dependency-free TypeScript library that normalizes coding-agent
-provider observations into a common chat-stream event vocabulary. It performs no
-I/O: functions take plain objects and return plain objects, so a caller supplies
-its own input source, persistence, and transport.
+The shared TypeScript reducer, transcript model and projections for Pentacle Web
+and Mobile. Functions take data and return data; transport, persistence and
+device presentation belong to the apps.
 
-## Install
+## Develop and verify
 
-No published lockfile is required; `npm install` resolves everything (the
-library declares no runtime dependencies, so this only fetches dev tooling):
+Use Node 22. From a clean checkout:
 
 ```sh
-npm install
+npm ci
+npm test
+npm run typecheck
+python3 scripts/check_public_residue.py
 ```
 
-## Typecheck and test
+There is no compiled package: the main and types entry points both point to
+`src/index.ts`, and existing deep imports continue to use the TypeScript source.
+`@noble/hashes` validates the existing daemon-notice body digest; it is a locked
+runtime dependency. Tests and fixtures use synthetic data.
 
-Everything runs from source against the checked-out tree — there is **no build
-step**. The package entry point (`main`/`types`) is `./src/index.ts`; consumers
-import the TypeScript source directly.
+## Advance a consumer
 
-```sh
-npm run typecheck        # tsc --noEmit over src
-npm test                 # runs tests/*.test.ts (node --test via tsx) + test typecheck
-```
+1. Fix or add behavior here, add a synthetic regression and run the checks.
+   Land it on public main first. Record the full commit ID.
+2. From a clean consumer checkout, run
+   `node pentacle-chat-core/scripts/verified-copy.cjs sync . FULL_UPSTREAM_COMMIT`.
+   This replaces the distribution and regenerates `config/pentacle-chat-core-pin.json`
+   together. Reinstall consumer dependencies from the lockfile before testing.
+   If the shared package metadata changed, regenerate your consumer lockfile.
+3. Commit the generated copy, pin and any needed adapter/lockfile changes
+   together. Do not hand-edit the copy. Each client can advance independently.
+   To roll back a consumer, revert its pin and distributed paths together.
 
-All commands are offline and deterministic; none need a network, a service, or a
-production port. Fixtures use synthetic identifiers and example text only.
-
-## Use as a dependency
-
-Vendor this directory into a consumer and reference it with a local `file:`
-dependency (for example `"pentacle-chat-core": "file:./pentacle-chat-core"`);
-the consumer's bundler compiles the TypeScript source. There is no separate
-compiled artifact to publish.
+`distribution.json` defines every installed path once, including package
+metadata, license, shared source and test fixtures. Consumer-owned lockfiles,
+renderers, native manifests and adapters stay outside this distribution.
+`check .` verifies local hashes and modes offline. The apps' existing CI jobs
+also run the verifier from public core main, independently resolve the pinned
+commit on that main and compare its complete distribution. Replacing a local
+hash cannot make a modified byte pass this second comparison. The consumer pin
+cannot change the public repository. Normal npm builds never fetch upstream Git.
